@@ -730,10 +730,21 @@ class HenanVideoProvider(VideoSourceProvider):
             response.raise_for_status()
             return response.json()
         except requests.RequestException as exc:
+            # 必须保留底层异常信息：``RequestException`` 同时覆盖
+            # DNS 失败 / 连接超时 / TLS 错误 / 上游 4xx 与 5xx，
+            # 若只报"请求失败"，事后无法区分究竟卡在哪一层。
+            status = exc.response.status_code if exc.response is not None else None
+            detail = f'{type(exc).__name__}: {exc}'
+            if status is not None:
+                detail = f'HTTP {status} · {detail}'
+
             raise VideoSourceError(
-                '河南高速云平台请求失败',
-                hint=f'请检查网络连通性，或确认 {base} 是否可访问',
-                payload={'endpoint': path},
+                f'河南高速云平台请求失败（{detail}）',
+                hint=(
+                    f'请检查网络连通性，或确认 {base} 是否可访问；'
+                    f'可运行 scripts\\diagnose_upstream.py 做分层诊断'
+                ),
+                payload={'endpoint': path, 'status': status},
             ) from exc
         except ValueError as exc:
             raise VideoSourceError(
