@@ -25,6 +25,8 @@ const props = withDefaults(
     snapshotUrl?: string
     /** 常显信息条；缺省时仅在悬停时浮现，以免遮挡画面 */
     showLabels?: boolean
+    /** 时序聚合所用的帧数；0 表示仅有单帧结果 */
+    flowFrames?: number
   }>(),
   {
     congestionLevel: 'normal',
@@ -32,6 +34,7 @@ const props = withDefaults(
     detecting: false,
     snapshotUrl: '',
     showLabels: false,
+    flowFrames: 0,
   },
 )
 
@@ -99,7 +102,9 @@ const { status, attach } = useHls(videoEl, streamUrl)
         <span class="badge" :style="{ color: CONGESTION_COLOR[congestionLevel] }">
           ● {{ CONGESTION_LABEL[congestionLevel] }}
         </span>
-        <span class="veh-count mono">{{ totalVehicles }} 辆</span>
+        <span class="veh-count mono" :title="flowFrames ? `跨 ${flowFrames} 帧关联后的独立目标数` : '单帧检测结果'">
+          {{ totalVehicles }} 辆<template v-if="flowFrames"> / {{ flowFrames }} 帧</template>
+        </span>
         <button
           class="btn btn-sm detect-btn"
           :disabled="detecting"

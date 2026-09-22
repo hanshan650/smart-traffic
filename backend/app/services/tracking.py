@@ -280,6 +280,11 @@ class IoUTracker:
     :param iou_threshold: 关联所需最小 IoU
     :param max_age: 轨迹在无匹配情况下可存活的帧数
     :param min_hits: 轨迹被"确认"（对外可见）所需的最少观测帧数
+    :param class_penalty: 类别不一致时的匹配降权值。
+        ``0`` 表示"类别必须一致才允许关联"（事故识别的默认行为，
+        避免人车 ID 串号）；设为正值则允许跨类别关联但降权，
+        适用于**流量计数** —— 低分辨率下同一辆车会被分类成
+        car/truck/train，硬约束会把一条轨迹拆成多条，使计数虚高。
 
     局限
     ----
@@ -292,10 +297,12 @@ class IoUTracker:
         iou_threshold: float = 0.3,
         max_age: int = 5,
         min_hits: int = 2,
+        class_penalty: float = 0.0,
     ) -> None:
         self.iou_threshold = iou_threshold
         self.max_age = max_age
         self.min_hits = min_hits
+        self.class_penalty = class_penalty
 
         self._tracks: Dict[int, Track] = {}
         self._next_id = 1
@@ -316,12 +323,24 @@ class IoUTracker:
                 track = self._tracks[track_id]
                 if not track.age:
                     continue
-                # 类别不一致时不给匹配机会（避免人车 ID 串号）
-                if track.class_name != det.class_name:
-                    continue
+
                 iou = bbox_iou(det.bbox, track.last.bbox)
-                if iou >= self.iou_threshold:
-                    pairs.append((iou, det_idx, track_id))
+                if iou < self.iou_threshold:
+                    continue
+
+                if track.class_name == det.class_name:
+                    score = iou
+                elif self.class_penalty > 0:
+                    # 允许跨类别关联但降权：保证同类优先，
+                    # 同时避免因单帧分类摇摆而拆散同一目标的轨迹
+                    score = iou - self.class_penalty
+                    if score <= 0:
+                        continue
+                else:
+                    # 默认硬约束：类别不一致不给匹配机会（防人车串号）
+                    continue
+
+                pairs.append((score, det_idx, track_id))
 
         # IoU 降序贪心
         pairs.sort(key=lambda item: item[0], reverse=True)

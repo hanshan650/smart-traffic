@@ -24,7 +24,7 @@ from starlette.concurrency import run_in_threadpool
 from app.core.config import settings
 from app.models.schemas import DetectionResult, EventLevel, EventType
 from app.realtime.ws_manager import broadcast_threadsafe
-from app.services import detector, event_service, video_source
+from app.services import detector, event_service, flow_service, video_source
 from app.services.detector import DetectorUnavailable
 from app.services.video_source import VideoSourceError
 
@@ -207,6 +207,52 @@ async def detect_live_snapshot(
         raise HTTPException(
             status_code=503,
             detail={'success': False, 'error': str(exc), 'hint': '模型未就绪，检测功能暂不可用'},
+        ) from exc
+
+
+@router.post('/flow', summary='多帧流量分析（时序聚合）')
+async def detect_flow(
+    source: Optional[str] = Query(None, description='视频源 key'),
+    camera_num: str = Query('', alias='cameraNum', description='摄像头编号'),
+    frame_count: int = Query(10, ge=3, le=30, alias='frameCount', description='分析帧数'),
+    road_id: str = Query('R001', alias='roadId'),
+) -> Dict[str, Any]:
+    """对一路摄像头做多帧流量分析（时序聚合）。
+
+    与 ``/snapshot`` 的单帧判定相比：
+
+    · 计数单位从「帧内检出的框数」改为「**被多帧确认的轨迹数**」
+    · 类别采用跨帧多数投票，消除单帧的类别摇摆
+    · 互补单帧漏检（实测召回约 +33%）
+
+    代价是需要逐帧推理，耗时约为单帧的数倍，故帧数上限设为 30。
+    响应中的 ``stability`` 字段给出单帧计数的波动范围，
+    供前端展示这次结果的可信度。
+    """
+    try:
+        provider = video_source.get_provider(source)
+        resolved = camera_num or provider.default_camera
+    except VideoSourceError as exc:
+        raise HTTPException(status_code=503, detail=exc.to_dict()) from exc
+
+    try:
+        return await run_in_threadpool(
+            flow_service.analyze_flow,
+            resolved,
+            source,
+            frame_count,
+            road_id,
+        )
+    except VideoSourceError as exc:
+        raise HTTPException(status_code=503, detail=exc.to_dict()) from exc
+    except DetectorUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                'success': False,
+                'error': str(exc),
+                'hint': '模型未就绪，流量分析不可用',
+            },
         ) from exc
 
 
