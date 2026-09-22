@@ -8,6 +8,8 @@ MongoDB 访问层
 +--------------+--------------------------------------------------+
 | detections   | 检测记录（图片 / 视频帧 / 直播帧的 YOLO 结果）    |
 | events       | 交通事件与告警（供大屏与告警中心消费）             |
+| officers     | 警员档案与勤务状态（供智能派警使用）              |
+| incidents    | 警情单（外部上报 + 内部派警 + 处置时间线）        |
 +--------------+--------------------------------------------------+
 
 MongoClient 自身线程安全且自带连接池，因此进程内复用单例即可。
@@ -71,6 +73,25 @@ def ensure_indexes() -> List[str]:
         [('road_id', ASCENDING), ('created_at', DESCENDING)], name='idx_road_created'
     )
     created.append('events(created_at, status, level, road+created_at)')
+
+    # 警员档案。**不建地理索引** —— 派警需要按距离排序，
+    # 但警员规模在百量级，应用层算直线距离（见 dispatch_service）
+    # 比维护 GeoJSON 字段与 2dsphere 索引更简单。
+    officers = db['officers']
+    officers.create_index([('officer_id', ASCENDING)], name='idx_officer_id', unique=True)
+    officers.create_index([('status', ASCENDING)], name='idx_officer_status')
+    officers.create_index([('unit', ASCENDING)], name='idx_officer_unit')
+    created.append('officers(officer_id unique, status, unit)')
+
+    # 警情单
+    incidents = db['incidents']
+    incidents.create_index([('created_at', DESCENDING)], name='idx_incident_created')
+    incidents.create_index([('status', ASCENDING)], name='idx_incident_status')
+    incidents.create_index([('event_id', ASCENDING)], name='idx_incident_event')
+    incidents.create_index(
+        [('assigned_officer_id', ASCENDING)], name='idx_incident_officer'
+    )
+    created.append('incidents(created_at, status, event, officer)')
 
     return created
 

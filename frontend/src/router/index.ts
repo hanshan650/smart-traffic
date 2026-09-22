@@ -56,6 +56,18 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '事故识别算法', icon: '⚡' },
       },
       {
+        path: 'dispatch',
+        name: 'dispatch',
+        component: () => import('@/views/DispatchView.vue'),
+        meta: { title: '警情调度', icon: '⚑' },
+      },
+      {
+        path: 'officers',
+        name: 'officers',
+        component: () => import('@/views/OfficersView.vue'),
+        meta: { title: '警员管理', icon: '☰' },
+      },
+      {
         path: 'system',
         name: 'system',
         component: () => import('@/views/SystemView.vue'),

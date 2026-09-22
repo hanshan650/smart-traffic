@@ -332,3 +332,288 @@ class StatsOverview(CamelModel):
     event_total: int = 0
     vehicle_total: int = 0
     avg_confidence: float = 0.0
+
+
+# ==========================================================================
+# 警员
+# ==========================================================================
+
+class OfficerStatus(str, Enum):
+    """警员值班状态。
+
+    只有 ``ON_DUTY`` 与 ``BUSY`` 参与派警评分，其余在候选阶段即被过滤。
+    """
+
+    ON_DUTY = 'on_duty'      # 在岗，可派
+    BUSY = 'busy'            # 出警中（仍可派，但降权）
+    OFF_DUTY = 'off_duty'    # 下班
+    LEAVE = 'leave'          # 请假
+
+
+class OfficerSkill(str, Enum):
+    """警员专长，用于与警情类型做匹配。"""
+
+    ACCIDENT = 'accident'            # 事故处理
+    TRAFFIC = 'traffic'              # 交通疏导
+    FIRST_AID = 'first_aid'          # 急救
+    HAZMAT = 'hazmat'                # 危险品处置
+    INVESTIGATION = 'investigation'  # 事故勘察
+
+
+class OfficerBase(CamelModel):
+    """警员基础字段（录入与更新共用）。"""
+
+    officer_id: str = Field(description='警号')
+    name: str = ''
+    rank: str = ''        # 警衔
+    unit: str = ''        # 所属单位 / 中队
+    phone: str = ''
+    status: OfficerStatus = OfficerStatus.OFF_DUTY
+    skills: List[OfficerSkill] = Field(default_factory=list)
+    latitude: float = 0.0
+    longitude: float = 0.0
+    region: str = ''      # 辖区
+    # 负载与绩效，供派警评分使用
+    active_cases: int = 0
+    total_handled: int = 0
+    avg_response_minutes: float = 0.0
+    note: str = ''
+
+
+class Officer(OfficerBase):
+    """警员（出参）。"""
+
+    id: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class OfficerCreate(OfficerBase):
+    """新增警员入参。"""
+
+
+class OfficerUpdate(CamelModel):
+    """更新警员入参。全部字段可选，仅提交需要修改的项。"""
+
+    name: Optional[str] = None
+    rank: Optional[str] = None
+    unit: Optional[str] = None
+    phone: Optional[str] = None
+    status: Optional[OfficerStatus] = None
+    skills: Optional[List[OfficerSkill]] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    region: Optional[str] = None
+    active_cases: Optional[int] = None
+    total_handled: Optional[int] = None
+    avg_response_minutes: Optional[float] = None
+    note: Optional[str] = None
+
+
+class OfficerListResponse(CamelModel):
+    success: bool = True
+    total: int = 0
+    items: List[Officer] = Field(default_factory=list)
+
+
+class OfficerStats(CamelModel):
+    """警员勤务概览。"""
+
+    total: int = 0
+    on_duty: int = 0
+    busy: int = 0
+    off_duty: int = 0
+    leave: int = 0
+    by_unit: Dict[str, int] = Field(default_factory=dict)
+
+
+# ==========================================================================
+# 警情上报适配器
+# ==========================================================================
+
+class ReportStatus(str, Enum):
+    """向外部交警平台的上报状态。"""
+
+    PENDING = 'pending'  # 待上报
+    SENT = 'sent'        # 已发出
+    ACKED = 'acked'      # 对方已回执
+    FAILED = 'failed'    # 上报失败（可重试）
+
+
+class ReporterInfo(CamelModel):
+    """上报适配器自描述。"""
+
+    key: str
+    display_name: str
+    mode: str = 'mock'                 # mock / real
+    available: bool = True
+    reason: str = ''
+    endpoint: str = ''
+    supports_ack: bool = False         # 是否提供回执查询
+
+
+class ReporterListResponse(CamelModel):
+    success: bool = True
+    current: str
+    reporters: List[ReporterInfo] = Field(default_factory=list)
+
+
+# ==========================================================================
+# 智能派警
+# ==========================================================================
+
+class DispatchEvidence(CamelModel):
+    """派警评分中的单条判据。
+
+    与事故识别的证据链同样保留「原始值 / 归一化得分 / 权重 / 贡献」，
+    使"为什么派给这个人"完全可追溯 —— 调度决策需要能向当事人解释。
+    """
+
+    name: str
+    label: str
+    raw_value: float
+    score: float
+    weight: float
+    contribution: float
+    detail: str = ''
+
+
+class DispatchCandidate(CamelModel):
+    """一名候选警员的评分明细。"""
+
+    officer_id: str
+    name: str
+    unit: str = ''
+    status: OfficerStatus = OfficerStatus.OFF_DUTY
+    distance_km: float = 0.0
+    eta_minutes: float = 0.0
+    active_cases: int = 0
+    matched_skills: List[OfficerSkill] = Field(default_factory=list)
+    score: float = 0.0
+    selected: bool = False
+    excluded: bool = False          # 状态不符被排除
+    exclude_reason: str = ''
+    evidences: List[DispatchEvidence] = Field(default_factory=list)
+
+
+class DispatchStrategy(str, Enum):
+    """派警策略。"""
+
+    NEAREST = 'nearest'        # 就近优先（默认）
+    BALANCED = 'balanced'      # 负载均衡（考虑在办案件数）
+    SKILL = 'skill'            # 技能优先（按警情类型匹配专长）
+
+
+class DispatchRequest(CamelModel):
+    """派警请求。"""
+
+    strategy: DispatchStrategy = DispatchStrategy.NEAREST
+    # 可选：直接指定警员（跳过算法）
+    officer_id: str = ''
+    top_n: int = 5             # 返回候选数量
+    note: str = ''
+
+
+# ==========================================================================
+# 警情（上报 + 派警单）
+# ==========================================================================
+
+class IncidentStatus(str, Enum):
+    """警情处置状态机。
+
+    REPORTED → DISPATCHED → ACCEPTED → ARRIVED → CLOSED
+    """
+
+    REPORTED = 'reported'      # 已上报，待派警
+    DISPATCHED = 'dispatched'  # 已派警，待接警
+    ACCEPTED = 'accepted'      # 警员已接警
+    ARRIVED = 'arrived'        # 警员已到场
+    CLOSED = 'closed'          # 已办结
+    FAILED = 'failed'          # 上报失败
+
+
+class TimelineEntry(CamelModel):
+    """处置时间线的一条记录。"""
+
+    at: datetime
+    action: str
+    note: str = ''
+
+
+class Incident(CamelModel):
+    """警情单：AI 事件 → 外部上报 → 内部派警的载体。"""
+
+    id: str
+    incident_no: str = ''            # 警情编号（面向人工的短号）
+    event_id: str = ''               # 关联的 AI 识别事件
+    type: EventType
+    level: EventLevel = EventLevel.WARNING
+    # 位置与现场
+    road_id: str = ''
+    camera_id: str = ''
+    camera_name: str = ''
+    latitude: float = 0.0
+    longitude: float = 0.0
+    address: str = ''
+    description: str = ''
+    snapshot_url: str = ''
+    score: float = 0.0               # 事故识别评分（来自 L2 融合）
+    # 上报
+    reporter: str = ''
+    report_status: ReportStatus = ReportStatus.PENDING
+    external_id: str = ''
+    report_message: str = ''
+    retries: int = 0
+    reported_at: Optional[datetime] = None
+    # 派警与处置
+    status: IncidentStatus = IncidentStatus.REPORTED
+    assigned_officer_id: str = ''
+    assigned_officer_name: str = ''
+    assigned_at: Optional[datetime] = None
+    accepted_at: Optional[datetime] = None
+    arrived_at: Optional[datetime] = None
+    closed_at: Optional[datetime] = None
+    distance_km: float = 0.0
+    eta_minutes: float = 0.0
+    strategy: str = ''
+    candidates: List[DispatchCandidate] = Field(default_factory=list)
+    timeline: List[TimelineEntry] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class IncidentCreate(CamelModel):
+    """从 AI 事件创建警情的入参。"""
+
+    event_id: str = ''
+    type: EventType = EventType.COLLISION
+    level: EventLevel = EventLevel.WARNING
+    road_id: str = ''
+    camera_id: str = ''
+    camera_name: str = ''
+    latitude: float = 0.0
+    longitude: float = 0.0
+    address: str = ''
+    description: str = ''
+    snapshot_url: str = ''
+    score: float = 0.0
+    # 创建后是否立即上报外部平台
+    auto_report: bool = True
+    reporter: str = ''
+
+
+class IncidentListResponse(CamelModel):
+    success: bool = True
+    total: int = 0
+    items: List[Incident] = Field(default_factory=list)
+
+
+class IncidentStats(CamelModel):
+    """警情统计。"""
+
+    total: int = 0
+    by_status: Dict[str, int] = Field(default_factory=dict)
+    by_type: Dict[str, int] = Field(default_factory=dict)
+    report_failed: int = 0
+    unassigned: int = 0
+    avg_dispatch_minutes: float = 0.0

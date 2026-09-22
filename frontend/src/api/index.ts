@@ -13,11 +13,19 @@ import type {
   CameraListResponse,
   ClientConfig,
   DetectionResult,
+  DispatchAlgorithmInfo,
+  DispatchStrategy,
   EventListResponse,
   EventReviewPayload,
   FlowResult,
   HealthStatus,
+  Incident,
+  IncidentListResponse,
+  IncidentStats,
   ModelStatus,
+  Officer,
+  OfficerListResponse,
+  OfficerStats,
   RoadNetwork,
   ScenarioInfo,
   SimulationResult,
@@ -214,5 +222,85 @@ export const accidentApi = {
   config: () =>
     http
       .get<{ success: boolean; config: AlgorithmConfig }>('/accident/config')
+      .then((r) => r.data),
+}
+
+// ==========================================================================
+// 警员
+// ==========================================================================
+
+export const officerApi = {
+  /** 警员列表。`status` 可选 on_duty / busy / off_duty / leave */
+  list: (params: { status?: string; unit?: string; keyword?: string; limit?: number } = {}) =>
+    http.get<OfficerListResponse>('/officers', { params }).then((r) => r.data),
+
+  /** 勤务概览（各状态人数与单位分布） */
+  stats: () => http.get<OfficerStats>('/officers/stats').then((r) => r.data),
+
+  /** 详情。注意入参是**警号**而非数据库 id */
+  detail: (officerId: string) =>
+    http.get<Officer>(`/officers/${officerId}`).then((r) => r.data),
+
+  create: (payload: Record<string, unknown>) =>
+    http.post<Officer>('/officers', payload).then((r) => r.data),
+
+  update: (officerId: string, payload: Record<string, unknown>) =>
+    http.put<Officer>(`/officers/${officerId}`, payload).then((r) => r.data),
+
+  remove: (officerId: string) =>
+    http.delete<{ success: boolean; message: string }>(`/officers/${officerId}`).then((r) => r.data),
+
+  /** 导入示例警员（幂等）。reset=true 会先清空 */
+  seed: (reset = false) =>
+    http
+      .post<{ success: boolean; created: number; message: string }>('/officers/seed', null, {
+        params: { reset },
+      })
+      .then((r) => r.data),
+}
+
+// ==========================================================================
+// 警情与派警
+// ==========================================================================
+
+export const incidentApi = {
+  list: (params: { status?: string; level?: string; limit?: number } = {}) =>
+    http.get<IncidentListResponse>('/incidents', { params }).then((r) => r.data),
+
+  stats: () => http.get<IncidentStats>('/incidents/stats').then((r) => r.data),
+
+  /** 派警判据、策略权重、上报适配器与状态机说明 */
+  algorithm: () =>
+    http.get<DispatchAlgorithmInfo>('/incidents/algorithm').then((r) => r.data),
+
+  detail: (incidentId: string) =>
+    http.get<Incident>(`/incidents/${incidentId}`).then((r) => r.data),
+
+  create: (payload: Record<string, unknown>) =>
+    http.post<Incident>('/incidents', payload).then((r) => r.data),
+
+  /** 向外部平台上报警情 */
+  report: (incidentId: string, reporter = '') =>
+    http
+      .post<Incident>(`/incidents/${incidentId}/report`, null, { params: { reporter } })
+      .then((r) => r.data),
+
+  /** 重试上报 */
+  retry: (incidentId: string) =>
+    http.post<Incident>(`/incidents/${incidentId}/retry`, null).then((r) => r.data),
+
+  /** 智能派警。无人可派时后端返回 409 */
+  dispatch: (
+    incidentId: string,
+    payload: { strategy?: DispatchStrategy; officerId?: string; topN?: number; note?: string },
+  ) =>
+    http
+      .post<Incident>(`/incidents/${incidentId}/dispatch`, payload, { timeout: 60000 })
+      .then((r) => r.data),
+
+  /** 处置流转：accept 接警 / arrive 到场 / close 办结 */
+  updateStatus: (incidentId: string, action: string, note = '') =>
+    http
+      .post<Incident>(`/incidents/${incidentId}/status`, null, { params: { action, note } })
       .then((r) => r.data),
 }

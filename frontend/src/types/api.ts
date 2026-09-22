@@ -434,6 +434,177 @@ export interface FlowResult {
 }
 
 // ==========================================================================
+// 警员
+// ==========================================================================
+
+export type OfficerStatus = 'on_duty' | 'busy' | 'off_duty' | 'leave'
+
+export type OfficerSkill =
+  | 'accident'
+  | 'traffic'
+  | 'first_aid'
+  | 'hazmat'
+  | 'investigation'
+
+export interface Officer {
+  id: string
+  /** 警号（业务主键） */
+  officerId: string
+  name: string
+  rank: string
+  unit: string
+  phone: string
+  status: OfficerStatus
+  skills: OfficerSkill[]
+  latitude: number
+  longitude: number
+  region: string
+  activeCases: number
+  totalHandled: number
+  avgResponseMinutes: number
+  note: string
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
+export interface OfficerListResponse {
+  success: boolean
+  total: number
+  items: Officer[]
+}
+
+export interface OfficerStats {
+  total: number
+  onDuty: number
+  busy: number
+  offDuty: number
+  leave: number
+  byUnit: Record<string, number>
+}
+
+// ==========================================================================
+// 警情与派警
+// ==========================================================================
+
+export type DispatchStrategy = 'nearest' | 'balanced' | 'skill'
+export type ReportStatus = 'pending' | 'sent' | 'acked' | 'failed'
+export type IncidentStatus =
+  | 'reported'
+  | 'dispatched'
+  | 'accepted'
+  | 'arrived'
+  | 'closed'
+  | 'failed'
+
+/** 派警评分中的单条判据（与事故识别同样的"证据链"设计） */
+export interface DispatchEvidence {
+  name: string
+  label: string
+  rawValue: number
+  score: number
+  weight: number
+  contribution: number
+  detail: string
+}
+
+/** 一名候选警员的评分明细 */
+export interface DispatchCandidate {
+  officerId: string
+  name: string
+  unit: string
+  status: OfficerStatus
+  distanceKm: number
+  etaMinutes: number
+  activeCases: number
+  matchedSkills: OfficerSkill[]
+  score: number
+  selected: boolean
+  excluded: boolean
+  excludeReason: string
+  evidences: DispatchEvidence[]
+}
+
+export interface TimelineEntry {
+  at: string
+  action: string
+  note: string
+}
+
+export interface Incident {
+  id: string
+  incidentNo: string
+  eventId: string
+  type: EventType
+  level: EventLevel
+  roadId: string
+  cameraId: string
+  cameraName: string
+  latitude: number
+  longitude: number
+  address: string
+  description: string
+  snapshotUrl: string
+  score: number
+  reporter: string
+  reportStatus: ReportStatus
+  externalId: string
+  reportMessage: string
+  retries: number
+  reportedAt?: string | null
+  status: IncidentStatus
+  assignedOfficerId: string
+  assignedOfficerName: string
+  assignedAt?: string | null
+  acceptedAt?: string | null
+  arrivedAt?: string | null
+  closedAt?: string | null
+  distanceKm: number
+  etaMinutes: number
+  strategy: string
+  candidates: DispatchCandidate[]
+  timeline: TimelineEntry[]
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
+export interface IncidentListResponse {
+  success: boolean
+  total: number
+  items: Incident[]
+}
+
+export interface IncidentStats {
+  total: number
+  byStatus: Record<string, number>
+  byType: Record<string, number>
+  reportFailed: number
+  unassigned: number
+  avgDispatchMinutes: number
+}
+
+export interface ReporterInfo {
+  key: string
+  displayName: string
+  mode: string
+  available: boolean
+  reason: string
+  endpoint: string
+  supportsAck: boolean
+}
+
+/** ``GET /incidents/algorithm`` 响应 */
+export interface DispatchAlgorithmInfo {
+  success: boolean
+  dispatch: {
+    criterions: { name: string; label: string; formula: string; rationale: string }[]
+    strategies: { key: string; weights: Record<string, number> }[]
+    config: { maxRadiusKm: number; avgSpeedKmh: number }
+  }
+  reporters: ReporterInfo[]
+  transitions: Record<string, Record<string, string>>
+}
+
+// ==========================================================================
 // WebSocket
 // ==========================================================================
 
@@ -496,4 +667,65 @@ export const EVENT_LEVEL_LABEL: Record<EventLevel, string> = {
   info: '提示',
   warning: '警告',
   critical: '严重',
+}
+
+export const EVENT_LEVEL_COLOR: Record<EventLevel, string> = {
+  info: '#38bdf8',
+  warning: '#facc15',
+  critical: '#ef4444',
+}
+
+// ---------------- 警员与警情展示辅助 ----------------
+
+export const OFFICER_STATUS_LABEL: Record<OfficerStatus, string> = {
+  on_duty: '在岗',
+  busy: '出警中',
+  off_duty: '下班',
+  leave: '请假',
+}
+
+export const OFFICER_STATUS_COLOR: Record<OfficerStatus, string> = {
+  on_duty: '#10b981',
+  busy: '#facc15',
+  off_duty: '#64748b',
+  leave: '#f97316',
+}
+
+export const OFFICER_SKILL_LABEL: Record<OfficerSkill, string> = {
+  accident: '事故处理',
+  traffic: '交通疏导',
+  first_aid: '急救',
+  hazmat: '危化品',
+  investigation: '事故勘察',
+}
+
+export const INCIDENT_STATUS_LABEL: Record<IncidentStatus, string> = {
+  reported: '已上报',
+  dispatched: '已派警',
+  accepted: '已接警',
+  arrived: '已到场',
+  closed: '已办结',
+  failed: '上报失败',
+}
+
+export const INCIDENT_STATUS_COLOR: Record<IncidentStatus, string> = {
+  reported: '#22d3ee',
+  dispatched: '#facc15',
+  accepted: '#f97316',
+  arrived: '#10b981',
+  closed: '#64748b',
+  failed: '#ef4444',
+}
+
+export const REPORT_STATUS_LABEL: Record<ReportStatus, string> = {
+  pending: '待上报',
+  sent: '已发送',
+  acked: '已受理',
+  failed: '上报失败',
+}
+
+export const DISPATCH_STRATEGY_LABEL: Record<DispatchStrategy, string> = {
+  nearest: '就近优先',
+  balanced: '负载均衡',
+  skill: '技能优先',
 }
