@@ -1,0 +1,81 @@
+/**
+ * 路由表
+ * ======
+ * · ``/screen`` 为独立的全屏指挥大屏，不使用 MainLayout
+ * · 其余页面统一挂在 MainLayout 下
+ */
+import { createRouter, createWebHistory } from 'vue-router'
+import type { RouteRecordRaw } from 'vue-router'
+
+const routes: RouteRecordRaw[] = [
+  {
+    path: '/screen',
+    name: 'screen',
+    component: () => import('@/views/ScreenView.vue'),
+    meta: { title: '指挥大屏', fullscreen: true },
+  },
+  {
+    path: '/',
+    component: () => import('@/layouts/MainLayout.vue'),
+    children: [
+      { path: '', redirect: '/dashboard' },
+      {
+        path: 'dashboard',
+        name: 'dashboard',
+        component: () => import('@/views/DashboardView.vue'),
+        meta: { title: '运行概览', icon: '◈' },
+      },
+      {
+        path: 'wall',
+        name: 'wall',
+        component: () => import('@/views/VideoWallView.vue'),
+        meta: { title: '实时监控', icon: '▦' },
+      },
+      {
+        path: 'map',
+        name: 'map',
+        component: () => import('@/views/MapView.vue'),
+        meta: { title: '地图态势', icon: '◉' },
+      },
+      {
+        path: 'events',
+        name: 'events',
+        component: () => import('@/views/EventsView.vue'),
+        meta: { title: '告警中心', icon: '⚠' },
+      },
+      {
+        path: 'roads',
+        name: 'roads',
+        component: () => import('@/views/RoadsView.vue'),
+        meta: { title: '上海路网', icon: '⇄' },
+      },
+      {
+        path: 'accident',
+        name: 'accident',
+        component: () => import('@/views/AccidentView.vue'),
+        meta: { title: '事故识别算法', icon: '⚡' },
+      },
+      {
+        path: 'system',
+        name: 'system',
+        component: () => import('@/views/SystemView.vue'),
+        meta: { title: '系统状态', icon: '◎' },
+      },
+    ],
+  },
+  { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
+]
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes,
+})
+
+router.afterEach((to) => {
+  const title = (to.meta.title as string | undefined) ?? ''
+  document.title = title
+    ? `${title} · 智能交通监测平台`
+    : '智能交通监测与事故预警平台'
+})
+
+export default router

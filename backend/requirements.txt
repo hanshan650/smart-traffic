@@ -1,0 +1,39 @@
+# ============================================================
+# 智能交通监测与事故预警平台 — 后端依赖
+# 实测环境：Python 3.12
+# ============================================================
+# 版本使用下限约束（>=）而非精确锁定，以兼容不同 Python 小版本。
+# 若需要完全可复现的构建，请执行：
+#     pip freeze > requirements.lock.txt
+# ============================================================
+
+# ---------- Web 框架 ----------
+fastapi>=0.115
+uvicorn[standard]>=0.34
+pydantic>=2.10
+pydantic-settings>=2.7
+python-multipart>=0.0.20
+
+# ---------- 数据存储 ----------
+pymongo>=4.6
+redis>=5.0
+
+# ---------- 工具 ----------
+requests>=2.31
+httpx>=0.27
+python-dotenv>=1.0
+Pillow>=10.3
+numpy>=1.26
+opencv-python>=4.9
+
+# ---------- 模型推理 ----------
+# 会连带安装 PyTorch（CPU 版约 1GB 下载量、解压后约 2GB），首次安装耗时较长。
+# 用镜像可显著提速：
+#     pip install ultralytics -i https://pypi.tuna.tsinghua.edu.cn/simple
+#
+# 权重 yolov8n.pt（约 6 MB）需放在 backend/ 目录，可从以下地址获取：
+#     https://github.com/ultralytics/assets/releases
+#
+# 未安装或缺少权重时，检测与实时分析接口返回明确的 503 提示；
+# 视频源、路网、告警、事故仿真等其余功能不受影响。
+ultralytics>=8.2
