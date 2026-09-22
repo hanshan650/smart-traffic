@@ -11,9 +11,19 @@
 ```
 smart-traffic/
 ├── backend/                        # FastAPI 后端
-│   ├── .venv/                      # Python 3.12 虚拟环境
+│   ├── .venv/                      # Python 3.12 虚拟环境（不入库）
 │   ├── requirements.txt
-│   ├── .env.example                # 环境变量样例
+│   ├── .env.example                # 环境变量样例（脱敏模板）
+│   ├── yolov8n.pt / yolov8s.pt     # 模型权重（不入库，见 README 指引）
+│   ├── static/uploads/             # 抓帧产物（不入库，含隐私画面）
+│   ├── scripts/                    # 标定与验证脚本（见 docs/模型选型实验.md）
+│   │   ├── verify_algorithm.py     # 事故算法场景验证
+│   │   ├── verify_temporal.py      # 时序聚合收益验证
+│   │   ├── compare_detectors.py    # 推理尺寸 × 模型 × 阈值扫描
+│   │   ├── compare_models.py       # 模型规模对比
+│   │   ├── compare_yolo_detr.py    # YOLO / RT-DETR 对比
+│   │   ├── probe_resolution.py     # 上游分辨率与编码诊断
+│   │   └── probe_cameras.py        # 批量摄像头探测
 │   └── app/
 │       ├── main.py                 # 应用入口（lifespan / CORS / 静态文件）
 │       ├── core/
@@ -24,16 +34,21 @@ smart-traffic/
 │       ├── models/
 │       │   └── schemas.py          # Pydantic 数据契约（自动 camelCase）
 │       ├── services/
-│       │   ├── video_source.py     # ★ 视频源适配层（河南 / 上海）
-│       │   ├── detector.py         # YOLO 检测（优雅降级）
+│       │   ├── video_source.py     # ★ 视频源适配层（河南 / 上海）+ 抓帧降级
+│       │   ├── detector.py         # YOLO 检测（优雅降级 + 类别修正）
+│       │   ├── geometry.py         # ★ 几何计算（IoU / 中心距 / 航向角）
+│       │   ├── tracking.py         # ★ 轨迹管理 + IoU/ByteTrack 跟踪
+│       │   ├── accident_detector.py# ★ 事故判定 L2 规则层 + L3 时序确认层
+│       │   ├── accident_service.py # ★ 事故分析编排 + 合成场景
 │       │   ├── road_network.py     # ★ 上海路网（与视频源解耦）
 │       │   └── event_service.py    # 检测记录 / 事件 / 统计
 │       ├── realtime/
 │       │   └── ws_manager.py       # WebSocket 连接管理
 │       └── api/v1/
 │           ├── system.py           # 健康 / 统计 / 配置 / WS
-│           ├── video.py            # 视频源接口
+│           ├── video.py            # 视频源接口 + HLS 代理
 │           ├── detection.py        # 检测接口
+│           ├── accident.py         # ★ 事故识别算法接口
 │           ├── events.py           # 事件与复核
 │           └── roads.py            # 上海路网 + 高德代理
 │
@@ -42,21 +57,27 @@ smart-traffic/
 │   └── src/
 │       ├── api/                    # axios 封装 + 端点
 │       ├── stores/                 # Pinia（system / video / event）
-│       ├── composables/            # useWebSocket / useAmap
-│       ├── components/             # StatCard / VideoTile / EventCard
+│       ├── composables/            # useWebSocket / useAmap / useHls
+│       ├── components/             # StatCard / VideoTile / VideoLightbox / EventCard
+│       ├── utils/camera.ts         # 摄像头标签生成（长站名收敛）
 │       ├── layouts/MainLayout.vue  # 后台布局 + 告警弹窗
 │       └── views/
 │           ├── ScreenView.vue      # 指挥大屏（1920×1080 等比缩放）
 │           ├── DashboardView.vue   # 运行概览
 │           ├── VideoWallView.vue   # 实时监控（视频墙）
 │           ├── MapView.vue         # 地图态势
+│           ├── AccidentView.vue    # ★ 事故识别算法演示台（证据链可视化）
 │           ├── EventsView.vue      # 告警中心
 │           ├── RoadsView.vue       # 上海路网
 │           └── SystemView.vue      # 系统状态
 │
-└── docs/
-    ├── 开题报告.md
-    └── 视频源说明.md
+├── docs/
+│   ├── 开题报告.md
+│   ├── 视频源说明.md                # 各地监控源可用性调研
+│   └── 模型选型实验.md              # ★ 检测参数标定与模型选型实测报告
+│
+├── start-backend.bat               # 一键启动后端
+└── start-frontend.bat              # 一键启动前端
 ```
 
 ---
@@ -152,6 +173,35 @@ AI 检出 → 事件落库(PENDING) → 弹窗置顶 → 值班员处置
 | 缺少 `yolov8n.pt` 权重 | 同上 | 提示下载地址；**权重需放在 `backend/` 目录** |
 | ffmpeg 未安装 | — | 三级降级：ffmpeg → OpenCV 直连 → HLS 分片离线解码 |
 | 高德 Key 未配置 | 地图空白 | 提示配置位置，其余功能正常 |
+
+### 3.5 检测参数与模型选型
+
+检测链路的参数经**实测标定**而非沿用默认值，并且排除了几个常见的优化方向。
+关键结论：
+
+| 参数 | 取值 | 依据 |
+|------|------|------|
+| 推理尺寸 | `imgsz=960` | 上游画面仅 352×288，默认 640 会大量漏检。同一帧同一模型：640 检出 1 个目标，960 检出 7 个 |
+| 模型 | `yolov8s` | `yolov8n` 与 `s` 在 960 下检出完全相同，取 `s` 保留精度余量 |
+| 置信度 | `0.25` | 再低会引入 `bench`/`boat` 等无关类别误检 |
+| 类别修正 | `train → truck` | 实测发现高速货车被系统性误判为火车，直接丢弃会使车辆数偏低 |
+| 时基 | 运行时探测帧率 | 上游为 25 fps；若按固定 10 fps 换算，速度会低估 2.5 倍 |
+
+**经实测排除的方向**（避免重复投入）：
+
+- **切片推理**（SAHI 类）—— 为 4000×3000 级大图设计，把 352×288 切块后
+  目标像素数不增加，无收益
+- **继续加大 `imgsz`** —— 1280 相比 960 检出完全相同，仅耗时翻倍
+- **继续放大模型** —— `n`≈`s`；且更大的 RT-DETR（r50vd）反而比 r18vd 少检出一半
+- **YOLO 换 RT-DETR** —— 同批样本检出打平（8 vs 8），且两者的小目标检出
+  都是 0，说明瓶颈在输入分辨率而非检测器架构
+- **超分辨率预处理** —— 无法恢复编码器已丢弃的细节
+
+**有效方向**：时序聚合（实测召回 +33%，10 帧内单帧计数在 1~3 间抖动，
+跨帧关联后稳定为 4）、更换更高分辨率视频源、微调模型。
+
+完整实验设计、原始数据与复现命令见
+**[`docs/模型选型实验.md`](docs/模型选型实验.md)**。
 
 ---
 
