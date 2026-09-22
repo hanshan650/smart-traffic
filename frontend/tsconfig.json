@@ -19,7 +19,10 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
 
-    "baseUrl": ".",
+    // 路径别名。
+    // 不使用已弃用的 baseUrl：在 moduleResolution 为 bundler / node16 /
+    // nodenext 时，paths 的值直接相对本文件所在目录解析，
+    // 无需 baseUrl 提供基准目录（baseUrl 将在 TypeScript 7.0 移除）。
     "paths": {
       "@/*": ["./src/*"]
     }
