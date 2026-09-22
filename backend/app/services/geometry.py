@@ -95,3 +95,34 @@ def sigmoid(x: float) -> float:
         return 1.0 / (1.0 + math.exp(-x))
     exp_x = math.exp(x)
     return exp_x / (1.0 + exp_x)
+
+
+# ==========================================================================
+# 地理距离（派警使用）
+# ==========================================================================
+
+EARTH_RADIUS_KM = 6371.0088
+
+
+def haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """两点间大圆距离（公里）。
+
+    派警只需在地图上找出最近的警员，Haversine 的球面近似
+    （误差 < 0.5%）完全够用，无需引入地理计算库。
+
+    注意：四个参数必须是**同一坐标系**下的经纬度。高德底图用 GCJ-02、
+    GPS 设备用 WGS84，混用会产生数百米偏移；本项目内警员与摄像头
+    坐标同源，不涉及该问题。
+    """
+    if not any((lat1, lng1, lat2, lng2)):
+        return 0.0
+
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lng2 - lng1)
+
+    a = (
+        math.sin(delta_phi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    )
+    return 2 * EARTH_RADIUS_KM * math.asin(min(1.0, math.sqrt(a)))
