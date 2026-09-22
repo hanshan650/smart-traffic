@@ -47,13 +47,9 @@
 """
 from __future__ import annotations
 
-import glob
 import os
-import subprocess
-from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from app.core.config import settings
 from app.models.schemas import BBox
 from app.services import detector as yolo_detector
 from app.services.accident_detector import (
@@ -64,9 +60,8 @@ from app.services.accident_detector import (
 from app.services.tracking import IoUTracker, Track, TrackPoint
 from app.services.video_source import (
     VideoSourceError,
-    find_ffmpeg,
+    extract_frames,
     get_provider,
-    grab_frames_from_hls,
     probe_frame_rate,
 )
 
@@ -83,103 +78,10 @@ DEFAULT_FRAME_COUNT = 30
 
 # ==========================================================================
 # 抽帧
+# --------------------------------------------------------------------------
+# 实现已移至 ``video_source.extract_frames`` —— 抓帧是视频源的职责，
+# 且流量分析（flow_service）与事故分析需要共用同一套三级降级逻辑。
 # ==========================================================================
-
-
-def extract_frames(
-    stream_url: str,
-    headers: Optional[Dict[str, str]] = None,
-    count: int = DEFAULT_FRAME_COUNT,
-    output_dir: Optional[str] = None,
-) -> List[str]:
-    """从直播流抽取连续帧，返回本地图片路径（按时间升序）。
-
-    按代价从低到高依次尝试三条路径：
-
-    1. **ffmpeg** —— 支持通过 ``-headers`` 携带 ``Referer``，
-       而这是上游校验所必需的（OpenCV 无法自定义请求头）
-    2. **OpenCV 直连** —— 仅对无需鉴权的流有效
-    3. **HLS 分片离线解码** —— 无 ffmpeg 环境下的兜底：
-       下载媒体分片后本地解码，同样可携带请求头
-    """
-    work_dir = output_dir or str(
-        settings.upload_path / f'frames_{datetime.utcnow().strftime("%Y%m%d%H%M%S%f")}'
-    )
-    os.makedirs(work_dir, exist_ok=True)
-
-    ffmpeg = find_ffmpeg()
-    if ffmpeg:
-        paths = _extract_with_ffmpeg(ffmpeg, stream_url, headers or {}, count, work_dir)
-        if paths:
-            return paths
-
-    paths = _extract_with_cv2(stream_url, count, work_dir)
-    if paths:
-        return paths
-
-    return grab_frames_from_hls(stream_url, headers, count, work_dir)
-
-
-def _extract_with_ffmpeg(
-    ffmpeg: str,
-    stream_url: str,
-    headers: Dict[str, str],
-    count: int,
-    work_dir: str,
-) -> List[str]:
-    """用 ffmpeg 抽帧，可携带自定义请求头。"""
-    pattern = os.path.join(work_dir, 'f_%04d.jpg')
-    timeout_sec = settings.frame_capture_timeout
-
-    cmd: List[str] = [ffmpeg, '-y']
-
-    # 上游 m3u8 / ts 分片校验 Referer，必须由 ffmpeg 代为携带
-    if headers:
-        header_arg = ''.join(f'{key}: {value}\r\n' for key, value in headers.items())
-        cmd += ['-headers', header_arg]
-
-    cmd += [
-        '-rw_timeout', str(timeout_sec * 1_000_000),   # 输入协议超时（微秒）
-        '-probesize', '2000000',
-        '-analyzeduration', '2000000',
-        '-i', stream_url,
-        '-frames:v', str(count),
-        '-q:v', '3',
-        pattern,
-    ]
-
-    try:
-        subprocess.run(cmd, capture_output=True, timeout=timeout_sec + count * 0.5, check=False)
-    except (subprocess.TimeoutExpired, OSError):
-        pass
-
-    return sorted(glob.glob(os.path.join(work_dir, 'f_*.jpg')))
-
-
-def _extract_with_cv2(stream_url: str, count: int, work_dir: str) -> List[str]:
-    """OpenCV 回退方案（无法携带请求头）。"""
-    try:
-        import cv2
-    except ImportError:
-        return []
-
-    capture = cv2.VideoCapture(stream_url)
-    if not capture.isOpened():
-        return []
-
-    paths: List[str] = []
-    try:
-        for index in range(count):
-            ok, frame = capture.read()
-            if not ok or frame is None:
-                break
-            path = os.path.join(work_dir, f'c_{index:04d}.jpg')
-            if cv2.imwrite(path, frame):
-                paths.append(path)
-    finally:
-        capture.release()
-
-    return paths
 
 
 # ==========================================================================

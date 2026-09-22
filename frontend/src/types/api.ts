@@ -382,6 +382,58 @@ export interface AnalyzeResult {
 }
 
 // ==========================================================================
+// 时序聚合（多帧流量分析）
+// ==========================================================================
+
+/** 稳定性指标：反映「只看一帧有多不可靠」 */
+export interface FlowStability {
+  min: number
+  median: number
+  max: number
+  /** 单帧计数的极差；越大说明单帧判定越不稳定 */
+  range: number
+  /** 聚合结果 − 单帧最大值。正 = 补回了漏检，负 = 滤除了单帧噪声 */
+  recallGain: number
+}
+
+/** 一条跨帧轨迹 */
+export interface FlowTrack {
+  trackId: number
+  className: string
+  observations: number
+  /** 该类别的得票明细，如 ``{car: 6, truck: 3}`` */
+  voteDetail: Record<string, number>
+  /** 全帧类别一致时为 true */
+  classStable: boolean
+}
+
+/** 多帧流量分析结果 */
+export interface FlowResult {
+  method: 'temporal'
+  cameraNum?: string
+  source?: string
+  roadId?: string
+  frameCount: number
+  fps: number
+  durationSeconds: number
+  /** 聚合后的车辆数（按轨迹去重） */
+  totalVehicles: number
+  vehicleCounts: Record<string, number>
+  congestionLevel: CongestionLevel
+  tracks: FlowTrack[]
+  /** 逐帧车辆数，用于观察抖动 */
+  perFrameCounts: number[]
+  stability: FlowStability
+  snapshotUrl: string
+  config: {
+    minHits: number
+    maxAge: number
+    iouThreshold: number
+    classPenalty: number
+  }
+}
+
+// ==========================================================================
 // WebSocket
 // ==========================================================================
 

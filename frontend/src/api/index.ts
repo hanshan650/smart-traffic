@@ -15,6 +15,7 @@ import type {
   DetectionResult,
   EventListResponse,
   EventReviewPayload,
+  FlowResult,
   HealthStatus,
   ModelStatus,
   RoadNetwork,
@@ -95,6 +96,17 @@ export const detectionApi = {
       })
       .then((r) => r.data)
   },
+
+  /** 多帧流量分析（时序聚合）。逐帧检测，耗时约为单帧的数倍 */
+  flow: (params: {
+    source?: string
+    cameraNum: string
+    frameCount?: number
+    roadId?: string
+  }) =>
+    http
+      .post<FlowResult>('/detection/flow', null, { params, timeout: 300000 })
+      .then((r) => r.data),
 
   /** 检测历史 */
   history: (params: { limit?: number; roadId?: string } = {}) =>

@@ -416,6 +416,113 @@ def grab_frames_from_hls(
     return paths
 
 
+# ==========================================================================
+# 连续抽帧（时序分析用）
+# --------------------------------------------------------------------------
+# 与 grab_frame 的区别：这里要的是**连续多帧**。
+# 时序聚合（跨帧计数）与事故识别（目标位移、速度骤降）都依赖帧间连续性，
+# 单帧抓取无法提供。
+# ==========================================================================
+
+DEFAULT_FRAME_COUNT = 30
+
+
+def extract_frames(
+    stream_url: str,
+    headers: Optional[Dict[str, str]] = None,
+    count: int = DEFAULT_FRAME_COUNT,
+    output_dir: Optional[str] = None,
+) -> List[str]:
+    """从直播流抽取连续帧，返回本地图片路径（按时间升序）。
+
+    与 :func:`grab_frame` 一样是三级降级（ffmpeg → OpenCV → HLS 分片），
+    但每级都改为抽取 ``count`` 帧而非一帧。
+    """
+    work_dir = output_dir or str(
+        settings.upload_path / f'frames_{datetime.utcnow().strftime("%Y%m%d%H%M%S%f")}'
+    )
+    os.makedirs(work_dir, exist_ok=True)
+
+    ffmpeg = find_ffmpeg()
+    if ffmpeg:
+        paths = _extract_with_ffmpeg(ffmpeg, stream_url, headers or {}, count, work_dir)
+        if paths:
+            return paths
+
+    paths = _extract_with_cv2(stream_url, count, work_dir)
+    if paths:
+        return paths
+
+    # 兜底：HLS 分片离线解码（无需 ffmpeg，且能携带 Referer）
+    return grab_frames_from_hls(stream_url, headers, count, work_dir)
+
+
+def _extract_with_ffmpeg(
+    ffmpeg: str,
+    stream_url: str,
+    headers: Dict[str, str],
+    count: int,
+    work_dir: str,
+) -> List[str]:
+    """用 ffmpeg 连续抽帧，可携带自定义请求头。
+
+    ``-rw_timeout`` 等输入协议选项**必须位于 ``-i`` 之前**，
+    否则会被当作输出选项而静默失效。
+    """
+    pattern = os.path.join(work_dir, 'f_%04d.jpg')
+    timeout_sec = settings.frame_capture_timeout
+
+    cmd: List[str] = [ffmpeg, '-y']
+
+    # 上游 m3u8 / ts 分片校验 Referer，必须由 ffmpeg 代为携带
+    if headers:
+        header_arg = ''.join(f'{key}: {value}\r\n' for key, value in headers.items())
+        cmd += ['-headers', header_arg]
+
+    cmd += [
+        '-rw_timeout', str(timeout_sec * 1_000_000),   # 输入协议超时（微秒）
+        '-probesize', '2000000',
+        '-analyzeduration', '2000000',
+        '-i', stream_url,
+        '-frames:v', str(count),
+        '-q:v', '3',
+        pattern,
+    ]
+
+    try:
+        subprocess.run(cmd, capture_output=True, timeout=timeout_sec + count * 0.5, check=False)
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+
+    return sorted(glob.glob(os.path.join(work_dir, 'f_*.jpg')))
+
+
+def _extract_with_cv2(stream_url: str, count: int, work_dir: str) -> List[str]:
+    """OpenCV 回退方案（无法携带请求头，仅对无需鉴权的流有效）。"""
+    try:
+        import cv2
+    except ImportError:
+        return []
+
+    capture = cv2.VideoCapture(stream_url)
+    if not capture.isOpened():
+        return []
+
+    paths: List[str] = []
+    try:
+        for index in range(count):
+            ok, frame = capture.read()
+            if not ok or frame is None:
+                break
+            path = os.path.join(work_dir, f'c_{index:04d}.jpg')
+            if cv2.imwrite(path, frame):
+                paths.append(path)
+    finally:
+        capture.release()
+
+    return paths
+
+
 def probe_frame_rate(
     stream_url: str,
     headers: Optional[Dict[str, str]],
