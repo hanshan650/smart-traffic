@@ -16,6 +16,24 @@ if not exist ".venv\Scripts\python.exe" (
     exit /b 1
 )
 
+if not exist ".env" (
+    echo [提示] 未找到 backend\.env，正在从模板创建...
+    copy /y ".env.example" ".env" > nul
+    echo        已创建。地图与视频源功能需填入自己的 Key 后重启，
+    echo        详见 .env 内注释（.env 不会被提交到仓库）。
+    echo.
+)
+
+for %%F in ("yolov8s.pt" "yolov8n.pt") do (
+    if exist "%%~F" goto :model_ok
+)
+echo [提示] 未找到模型权重 yolov8s.pt / yolov8n.pt
+echo        检测功能不可用，其余功能正常。下载地址：
+echo        https://github.com/ultralytics/assets/releases
+echo.
+
+:model_ok
+
 echo ============================================================
 echo   智能交通监测与事故预警平台 — 后端
 echo   地址：http://127.0.0.1:8000
