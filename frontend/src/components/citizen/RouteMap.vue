@@ -67,8 +67,9 @@ const following = ref(true)
 /** 详情卡（点击某个事件点后弹出） */
 const selected = ref<{ title: string; lines: string[]; level: string } | null>(null)
 
-/** 底部列表是否展开。移动端占屏幕，给个折叠能力 */
-const listOpen = ref(true)
+/** 底部列表是否展开。手机端默认收起成一行摘要 —— 这一页的主体是地图 */
+const isNarrow = typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
+const listOpen = ref(!isNarrow)
 
 /** 路段选择器是否展开 */
 const pickerOpen = ref(false)
@@ -126,26 +127,58 @@ function isValidPoint(latitude?: number | null, longitude?: number | null): bool
  *
  * 样式必须**内联**：高德会把这段 HTML 插到自己的容器里，
  * 而组件的 scoped 样式带 data-v 属性，选不中这些节点。
- * 用内联样式比"再写一个全局样式块"更不容易漏。
  *
- * 底部加小尖角并把整体上移 32px：事件往往就在用户脚下
- * （"不足 50 米"是常态），若标记压在真实坐标上，
- * 会被 zIndex 更高的"我的位置"蓝点整个盖住 —— 地图上看着什么都没有，
- * 而列表里却列着一条事件。尖角指向真实位置，标记本体浮在上方。
+ * 尺寸必须**从 CSS 变量读**而不是写死：标记的大小得跟界面字号一起变，
+ * 否则宽屏下字变大了、圆圈还是手机尺寸，比例就很怪。
+ * 内联样式用不了 `var()`（它不在我们的样式上下文里），所以只能由 JS 取出来拼进去。
+ *
+ * 底部加小尖角并把整体上移，让尖角指向真实坐标：事件往往就在用户脚下
+ * （"不足 50 米"是常态），若标记压在真实坐标上，会被 zIndex 更高的
+ * "我的位置"蓝点整个盖住 —— 地图上看着什么都没有，而列表里却列着一条事件。
  */
-function pinHtml(index: number, color: string): string {
+function pinHtml(index: number, color: string, pin: PinStyle): string {
+  const tip = pin.tip
   return (
-    '<div style="width:26px;text-align:center;">' +
-    `<div style="width:26px;height:26px;border-radius:50%;background:${color};` +
+    `<div style="width:${pin.size}px;text-align:center;">` +
+    `<div style="width:${pin.size}px;height:${pin.size}px;border-radius:50%;background:${color};` +
     'color:#fff;display:flex;align-items:center;justify-content:center;' +
-    'font-size:13px;font-weight:700;font-family:system-ui,sans-serif;' +
+    `font-size:${pin.font}px;font-weight:700;font-family:system-ui,sans-serif;` +
     'border:2px solid #fff;box-sizing:border-box;' +
     `box-shadow:0 2px 8px rgba(15,23,42,.35);">${index}</div>` +
-    '<div style="width:0;height:0;margin:-1px auto 0;' +
+    `<div style="width:0;height:0;margin:-1px auto 0;` +
     'border-left:5px solid transparent;border-right:5px solid transparent;' +
-    `border-top:7px solid ${color};"></div>` +
+    `border-top:${tip}px solid ${color};"></div>` +
     '</div>'
   )
+}
+
+interface PinStyle {
+  size: number
+  font: number
+  /** 尖角高度 */
+  tip: number
+  /** Marker 相对坐标的偏移，使尖角底端落在真实位置上 */
+  offsetY: number
+}
+
+/**
+ * 从 CSS 变量读出标记尺寸。
+ *
+ * 变量定义在 `CitizenLayout` 的 `.citizen-shell` 上，并且随手机会变宽屏
+ * 而整档上调 —— 地图标记必须跟着变，否则宽屏下会是"大字配小圈"。
+ */
+function readPinStyle(): PinStyle {
+  const FALLBACK = { size: 26, font: 13 }
+  if (typeof document === 'undefined') {
+    return { ...FALLBACK, tip: 7, offsetY: -32 }
+  }
+  const host = document.querySelector('.citizen-shell')
+  const cs = host ? getComputedStyle(host) : null
+  const size = parseFloat(cs?.getPropertyValue('--pin-size') ?? '') || FALLBACK.size
+  const font = parseFloat(cs?.getPropertyValue('--pin-font') ?? '') || FALLBACK.font
+  // 尖角按比例缩放，保证放大的只是整体而不只是圆点
+  const tip = Math.max(5, Math.round(size * 0.27))
+  return { size, font, tip, offsetY: -(size + tip - 1) }
 }
 
 /** 我的位置标记。外层光晕用全局 keyframes 做呼吸效果（见文件末尾的非 scoped 样式块） */
@@ -210,14 +243,15 @@ function draw(): void {
   })
 
   // ---- 3. 本路段事件：带编号的大标记，编号对应底部列表 ----
+  const pin = readPinStyle()
   const numbered = aheadList.value
   numbered.forEach((item, index) => {
     const color = CITIZEN_LEVEL_COLOR[item.event.level] ?? '#64748b'
     const marker = new AMap.value.Marker({
       position: [item.event.longitude as number, item.event.latitude as number],
-      content: pinHtml(index + 1, color),
-      // 宽 26 居中；高 32（圆 26 + 尖 7 - 叠 1）让尖角底端落在真实坐标上
-      offset: new AMap.value.Pixel(-13, -32),
+      content: pinHtml(index + 1, color, pin),
+      // 宽居中；纵向让尖角底端落在真实坐标上
+      offset: new AMap.value.Pixel(-pin.size / 2, pin.offsetY),
       zIndex: 150,
       cursor: 'pointer',
     })
@@ -336,6 +370,25 @@ function maybeEnterTracking(): void {
   enteredTracking = true
 }
 
+let resizeTimer: number | undefined
+
+/**
+ * 视口变化后重绘。
+ *
+ * 标记尺寸是从 CSS 变量读出来的，而变量会随断点（手机 ↔ 宽屏）整档变化；
+ * 不重绘的话，把窗口从窄拖到宽会出现"字变大了、圆圈还是原尺寸"。
+ *
+ * 做防抖：拖动窗口会连续触发 resize，每次都重绘整张地图没有必要。
+ */
+function onResize(): void {
+  if (resizeTimer !== undefined) window.clearTimeout(resizeTimer)
+  resizeTimer = window.setTimeout(() => {
+    draw()
+    // 用户已经手动拖过地图、或已经跟随过用户位置时，不要抢回视野
+    if (!enteredTracking && !props.fix) fitAll()
+  }, 200)
+}
+
 onMounted(async () => {
   if (!systemStore.config) {
     await systemStore.loadConfig()
@@ -353,6 +406,9 @@ onMounted(async () => {
   amap.value?.on?.('dragstart', () => {
     following.value = false
   })
+
+  // 视口尺寸变化后标记尺寸可能跨档（手机 ↔ 宽屏），需要重绘
+  window.addEventListener('resize', onResize)
 
   draw()
   maybeEnterTracking()
@@ -379,7 +435,11 @@ watch(
   },
 )
 
-onBeforeUnmount(destroy)
+onBeforeUnmount(() => {
+  if (resizeTimer !== undefined) window.clearTimeout(resizeTimer)
+  window.removeEventListener('resize', onResize)
+  destroy()
+})
 
 /** 定位按钮：重新定位并恢复跟随 */
 function onLocate(): void {
@@ -414,10 +474,14 @@ function pickRoad(road: string): void {
             {{ currentStatus.congestionLabel }}
           </span>
         </div>
+        <!--
+          副标题拆成两个独立 flex item 而不是一个长句子。
+          窄屏下卡片只有 180px 左右，长句子会在"…50 米以 / 内"中间
+          断掉；拆开后换行发生在两段之间，读起来是完整的。
+        -->
         <div class="road-sub">
-          <span v-if="aheadList.length">
-            前方 {{ aheadList.length }} 个事件 · 最近 {{ formatDistance(aheadList[0].distanceKm) }}
-          </span>
+          <span v-if="aheadList.length">前方 {{ aheadList.length }} 个事件</span>
+          <span v-if="aheadList.length">最近 {{ formatDistance(aheadList[0].distanceKm) }}</span>
           <span v-else>前方暂无事件</span>
           <span v-if="route.source === 'manual'" class="road-tag">手动选择</span>
         </div>
@@ -493,6 +557,15 @@ function pickRoad(road: string): void {
           前方路况
           <span v-if="aheadList.length" class="sheet-count">{{ aheadList.length }}</span>
         </span>
+        <!--
+          收起时直接给出最关键的一条，而不是只留一个标题。
+          只看标题的话用户必须先展开才知道有没有事 —— 而"前面有没有事"
+          正是这一页要回答的第一个问题。
+        -->
+        <span v-if="!listOpen && aheadList.length" class="sheet-summary">
+          {{ aheadList[0].event.eventTypeLabel }} · {{ formatDistance(aheadList[0].distanceKm) }}
+        </span>
+        <span v-else-if="!listOpen" class="sheet-summary muted">暂无事件</span>
         <span class="sheet-chevron">{{ listOpen ? '▾' : '▴' }}</span>
       </button>
 
@@ -628,6 +701,20 @@ function pickRoad(road: string): void {
   border: 1px solid var(--c-border);
   background: var(--c-surface);
 }
+
+@media (max-width: 767px) {
+  /*
+    手机端改为“撑满剩余空间”而不是算一个固定高度。
+    外壳已经把高度锁成一屏（见 CitizenLayout），这里 flex 撑开即可，
+    于是页面上不会出现滚动条 —— 拖地图时不会把整页拖走。
+    min-height 必须归零，否则 flex item 会拒绝收缩到内容高度以下。
+  */
+  .map-wrap {
+    height: auto;
+    flex: 1;
+    min-height: 0;
+  }
+}
 .map-canvas {
   width: 100%;
   height: 100%;
@@ -651,21 +738,21 @@ function pickRoad(road: string): void {
   gap: 6px;
   background: var(--c-surface-2);
   color: var(--c-text-faint);
-  font-size: 13px;
+  font-size: var(--fs-base);
   text-align: center;
   padding: 20px;
 }
 .mask-title {
-  font-size: 14px;
+  font-size: var(--fs-md);
   color: var(--c-text-dim);
 }
 .mask-detail {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 1.6;
   max-width: 300px;
 }
 .mask-hint {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--c-text-faint);
 }
 
@@ -685,8 +772,8 @@ function pickRoad(road: string): void {
 .road-card {
   flex: 1;
   min-width: 0;
-  padding: 9px 12px;
-  border-radius: 12px;
+  padding: 7px 10px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(6px);
   box-shadow: 0 2px 14px rgba(15, 23, 42, 0.18);
@@ -707,7 +794,7 @@ function pickRoad(road: string): void {
   border-radius: 50%;
 }
 .road-name {
-  font-size: 15px;
+  font-size: var(--fs-md);
   color: var(--c-text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -715,7 +802,7 @@ function pickRoad(road: string): void {
 }
 .road-status {
   flex: 0 0 auto;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 .road-status.muted {
@@ -725,9 +812,15 @@ function pickRoad(road: string): void {
 .road-sub {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 3px;
-  font-size: 11px;
+  /*
+    间距兼作分隔符。
+    不用“·”是因为它也是个 flex item，可能被单独挤到一行去。
+    允许整体换行而不是在 span 内部断字。
+  */
+  gap: 3px 8px;
+  margin-top: 2px;
+  flex-wrap: wrap;
+  font-size: var(--fs-sm);
   color: var(--c-text-dim);
 }
 .road-tag {
@@ -735,27 +828,27 @@ function pickRoad(road: string): void {
   border-radius: 6px;
   background: var(--c-primary-soft);
   color: var(--c-primary);
-  font-size: 10px;
+  font-size: var(--fs-xs);
 }
 
 .topbar-actions {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
 }
 .icon-btn {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   display: grid;
   place-items: center;
   border: none;
-  border-radius: 12px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(6px);
   box-shadow: 0 2px 14px rgba(15, 23, 42, 0.18);
   color: var(--c-text-dim);
-  font-size: 18px;
+  font-size: var(--fs-md);
   cursor: pointer;
 }
 .icon-btn.active {
@@ -794,7 +887,7 @@ function pickRoad(road: string): void {
   justify-content: space-between;
   padding: 9px 12px;
   border-bottom: 1px solid var(--c-border);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--c-text-dim);
 }
 .picker-close {
@@ -802,7 +895,7 @@ function pickRoad(road: string): void {
   background: none;
   color: var(--c-text-faint);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 .picker-list {
   margin: 0;
@@ -817,7 +910,7 @@ function pickRoad(road: string): void {
   border-radius: 8px;
   background: none;
   color: var(--c-text);
-  font-size: 13px;
+  font-size: var(--fs-base);
   text-align: left;
   cursor: pointer;
 }
@@ -848,7 +941,7 @@ function pickRoad(road: string): void {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 14px;
+  font-size: var(--fs-md);
 }
 .info-head strong {
   flex: 1;
@@ -869,11 +962,11 @@ function pickRoad(road: string): void {
   background: none;
   color: var(--c-text-faint);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--fs-base);
 }
 .info-line {
   margin: 5px 0 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.6;
   color: var(--c-text-dim);
 }
@@ -902,23 +995,37 @@ function pickRoad(road: string): void {
 .sheet-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   width: 100%;
-  padding: 11px 14px;
+  padding: 9px 14px;
   border: none;
   background: none;
   cursor: pointer;
   /* 移动端点按目标 */
-  min-height: 42px;
+  min-height: 40px;
 }
 .sheet-title {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 7px;
-  font-size: 13px;
+  gap: 6px;
+  font-size: var(--fs-base);
   font-weight: 600;
   color: var(--c-text);
+}
+/* 收起时右侧的一行摘要，占满剩余宽度并允许省略 */
+.sheet-summary {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  font-size: var(--fs-sm);
+  color: var(--c-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sheet-summary.muted {
+  color: var(--c-text-faint);
 }
 .sheet-count {
   min-width: 19px;
@@ -926,13 +1033,13 @@ function pickRoad(road: string): void {
   border-radius: 9px;
   background: var(--c-danger);
   color: #fff;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   text-align: center;
 }
 .sheet-chevron {
   color: var(--c-text-faint);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .sheet-body {
@@ -941,7 +1048,7 @@ function pickRoad(road: string): void {
 }
 .sheet-empty {
   padding: 8px 0 10px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--c-text-faint);
 }
 
@@ -966,7 +1073,7 @@ function pickRoad(road: string): void {
   place-items: center;
   border-radius: 50%;
   color: #fff;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 700;
 }
 .event-main {
@@ -980,19 +1087,19 @@ function pickRoad(road: string): void {
   gap: 8px;
 }
 .event-type {
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 600;
   color: var(--c-text);
 }
 .event-dist {
   flex: 0 0 auto;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--c-primary);
 }
 .event-desc {
   margin: 2px 0 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.5;
   color: var(--c-text-dim);
 }
@@ -1003,7 +1110,7 @@ function pickRoad(road: string): void {
   border-top: 1px dashed var(--c-border-strong);
 }
 .other-title {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--c-text-faint);
   margin-bottom: 5px;
 }
@@ -1017,7 +1124,7 @@ function pickRoad(road: string): void {
   align-items: center;
   gap: 7px;
   padding: 5px 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   cursor: pointer;
 }
 .other-dot {
@@ -1050,25 +1157,32 @@ function pickRoad(road: string): void {
 
 .sheet-note {
   margin: 8px 0 0;
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   line-height: 1.5;
   color: var(--c-text-faint);
 }
 
 /* 窄屏：地图铺满宽度，去侧边框拿回几像素视觉空间 */
 @media (max-width: 767px) {
-  .map-wrap {
-    height: calc(100dvh - 250px);
-    min-height: 420px;
-    border-radius: 0;
-    border-left: none;
-    border-right: none;
+  /* 展开后不要占太多：地图才是这一页的主体 */
+  .bottom-sheet:not(.collapsed) {
+    max-height: 40%;
   }
   .road-card {
-    padding: 8px 10px;
+    padding: 6px 9px;
   }
-  .road-name {
-    font-size: 14px;
+  .topbar {
+    top: 8px;
+    left: 8px;
+    right: 8px;
+  }
+  .sheet-body {
+    padding: 0 12px 10px;
+  }
+  .info-card {
+    left: 8px;
+    bottom: 8px;
+    width: min(280px, calc(100% - 16px));
   }
 }
 </style>

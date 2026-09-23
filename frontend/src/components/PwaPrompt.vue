@@ -130,11 +130,21 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/*
+  字号变量带 fallback。
+  本组件在民众端（有 --fs-* 阶梯）与警务端（无）都会挂载，
+  警务端拿不到变量，用 fallback 保持原尺寸即可。
+*/
 .pwa-bar {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  bottom: calc(66px + env(safe-area-inset-bottom, 0px));
+  /*
+    贴在底部 Tab 上方。
+    58 = Tab 高 50 + 8 的间距。原先是 66，那是按旧布局（Tab 更矮）估的，
+    实测会压到地图页的底部事件条上 —— 提示条出现在用户正看的事件上很别扭。
+  */
+  bottom: calc(58px + env(safe-area-inset-bottom, 0px));
   z-index: 1600;
   display: flex;
   align-items: center;
@@ -145,7 +155,7 @@ onBeforeUnmount(() => {
   background: #ffffff;
   border: 1px solid #e2e8f0;
   box-shadow: 0 4px 18px rgba(15, 23, 42, 0.16);
-  font-size: 12px;
+  font-size: var(--fs-sm, 12px);
 }
 
 /* 离线与更新用不同的强调色，避免"有新版本"和"断网了"被看成一回事 */
@@ -167,7 +177,7 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   background: #1d4ed8;
   color: #fff;
-  font-size: 14px;
+  font-size: var(--fs-md, 14px);
   font-weight: 700;
 }
 .pwa-offline .pwa-icon {
@@ -185,12 +195,12 @@ onBeforeUnmount(() => {
   gap: 1px;
 }
 .pwa-text strong {
-  font-size: 12.5px;
+  font-size: var(--fs-sm, 12.5px);
   color: #0f172a;
   font-weight: 600;
 }
 .pwa-text span {
-  font-size: 11px;
+  font-size: var(--fs-xs, 11px);
   color: #64748b;
   line-height: 1.4;
 }
@@ -202,7 +212,7 @@ onBeforeUnmount(() => {
   border-radius: 9px;
   background: #1d4ed8;
   color: #fff;
-  font-size: 12px;
+  font-size: var(--fs-sm, 12px);
   font-weight: 600;
   cursor: pointer;
   /* 移动端点按目标不小于 36px，避免手指够不准 */
@@ -229,7 +239,7 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   background: none;
   color: #94a3b8;
-  font-size: 13px;
+  font-size: var(--fs-base, 13px);
   line-height: 1;
   cursor: pointer;
 }
