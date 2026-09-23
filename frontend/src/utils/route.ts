@@ -105,7 +105,15 @@ export interface RouteContext {
   unlocated: PublicEvent[]
 }
 
-function hasPoint(event: PublicEvent): boolean {
+/**
+ * 事件是否带可用坐标。
+ *
+ * 写成类型谓词而非普通布尔函数：调用方 `find(hasPoint)` / `filter(hasPoint)`
+ * 之后元素会被 TS 收窄为"坐标是 number"，不必再逐处非空断言。
+ */
+export function hasPoint(
+  event: PublicEvent,
+): event is PublicEvent & { latitude: number; longitude: number } {
   return (
     typeof event.latitude === 'number' &&
     typeof event.longitude === 'number' &&
