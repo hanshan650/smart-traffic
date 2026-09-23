@@ -10,6 +10,7 @@ import type {
   AlgorithmInfo,
   AmapRoute,
   AnalyzeResult,
+  AuthUserResponse,
   CameraListResponse,
   CameraWatchState,
   ClientConfig,
@@ -30,6 +31,7 @@ import type {
   OfficerStats,
   OwnerLookupResult,
   RoadNetwork,
+  RoleOption,
   RuntimeConfigSaveResult,
   RuntimeConfigState,
   ScenarioInfo,
@@ -66,6 +68,36 @@ export const systemApi = {
    */
   saveRuntimeConfig: (payload: { token: string; values: Record<string, string> }) =>
     http.post<RuntimeConfigSaveResult>('/runtime-config', payload).then((r) => r.data),
+}
+
+/**
+ * 认证
+ *
+ * 会话值不在响应体里 —— 它只走 HttpOnly Cookie，JS 读不到。
+ * 因此前端不存 token，只存"当前是谁"用于渲染。
+ */
+export const authApi = {
+  login: (officerId: string, password: string) =>
+    http
+      .post<AuthUserResponse>('/auth/login', { officerId, password })
+      .then((r) => r.data),
+
+  logout: () => http.post<{ success: boolean }>('/auth/logout').then((r) => r.data),
+
+  me: () => http.get<AuthUserResponse>('/auth/me').then((r) => r.data),
+
+  /** 角色说明。公开接口，登录页在未登录时也能拿到 */
+  roles: () =>
+    http.get<{ success: boolean; items: RoleOption[] }>('/auth/roles').then((r) => r.data),
+
+  /** 改口令会踢掉该账号的全部会话，接口会顺便下发新的 cookie */
+  changePassword: (oldPassword: string, newPassword: string) =>
+    http
+      .post<AuthUserResponse & { revoked: number }>('/auth/password', {
+        oldPassword,
+        newPassword,
+      })
+      .then((r) => r.data),
 }
 
 // ==========================================================================

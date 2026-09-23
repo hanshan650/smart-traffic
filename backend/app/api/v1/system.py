@@ -162,7 +162,38 @@ def save_runtime_config(payload: RuntimeConfigUpdate) -> Dict[str, Any]:
 
 @router.websocket('/ws')
 async def websocket_endpoint(websocket: WebSocket) -> None:
-    """实时推送长连接。"""
+    """实时推送长连接。
+
+    **WebSocket 不走 HTTP 中间件**，所以鉴权要在这里单独做一次。
+    握手请求会带上同源 cookie，因此能复用同一套会话。
+    """
+    from app.core.config import settings
+    from app.services import auth_service
+
+    token = websocket.cookies.get(settings.auth_cookie_name, '')
+    document = None
+    if token:
+        try:
+            document = auth_service.get_session(token)
+        except Exception:
+            document = None
+
+    if document is None:
+        # 先 accept 再 close：未握手就 close，浏览器只会看到 403 与
+        # close code 1006，前端无法区分"没登录"和"网络断了"。
+        # 走 1008（Policy Violation）前端才能据此提示"请先登录"并停止重连。
+        await websocket.accept()
+        await websocket.close(code=1008, reason='未登录')
+        return
+
+    if (document.get('role') or '') == 'auditor':
+        # 审计员不接实时推送。长连接会广播告警事件，而审计员的可见范围
+        # 只有查询留痕（HTTP 侧也只放行了 audits）—— 让他连上等于开了
+        # 一条绕过 HTTP 权限的旁路。同一用 1008，前端据此停止重连。
+        await websocket.accept()
+        await websocket.close(code=1008, reason='当前角色不需要实时推送')
+        return
+
     await manager.connect(websocket)
     try:
         await manager.send(websocket, 'health', {

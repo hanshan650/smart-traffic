@@ -270,6 +270,34 @@ export interface RuntimeConfigSaveResult {
   config: RuntimeConfigState
 }
 
+// ==========================================================================
+// 认证
+// ==========================================================================
+
+/** 当前登录身份。`role` 用于控制界面元素的可见性 */
+export interface AuthUser {
+  officerId: string
+  name: string
+  unit: string
+  role: string
+  roleLabel: string
+  roleHint: string
+  /** 会话到期时间（ISO）。不返回会话值本身 —— 它只走 HttpOnly Cookie */
+  expiresAt: string | null
+}
+
+export interface AuthUserResponse {
+  success: boolean
+  user: AuthUser
+  message?: string
+}
+
+export interface RoleOption {
+  value: string
+  label: string
+  hint: string
+}
+
 export interface ModelStatus {
   available: boolean
   reason: string
