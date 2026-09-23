@@ -5,6 +5,8 @@
 | ``GET  /health``| 健康检查（MongoDB / Redis / YOLO / 视频源 / WS）  |
 | ``GET  /stats`` | 大屏统计概览                                     |
 | ``GET  /config``| 前端运行时配置（高德 Key、阈值、地图中心）        |
+| ``GET  /runtime-config`` | 可在线修改的配置项（默认关闭）            |
+| ``POST /runtime-config`` | 保存配置到 .env（需口令）                 |
 | ``WS   /ws``    | 实时推送                                         |
 +-----------------+-------------------------------------------------+
 
@@ -17,13 +19,13 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
 from app.core.config import settings
-from app.models.schemas import HealthStatus, StatsOverview
+from app.models.schemas import CamelModel, HealthStatus, StatsOverview
 from app.realtime import ws_manager
 from app.realtime.ws_manager import manager
-from app.services import detector, event_service, video_source
+from app.services import detector, event_service, runtime_config, video_source
 
 router = APIRouter(tags=['系统'])
 
@@ -99,6 +101,58 @@ def client_config() -> Dict[str, Any]:
             'heavy': settings.traffic_heavy_threshold,
         },
         'videoSource': settings.video_source,
+    }
+
+
+class RuntimeConfigUpdate(CamelModel):
+    """网页提交的配置改动。
+
+    ``token`` 与 ``values`` 分开传，而不是把口令塞进 values：
+    口令不是配置项，不该进入白名单校验与 .env 写入的流程。
+    """
+
+    token: str = ''
+    values: Dict[str, str] = {}
+
+
+@router.get('/runtime-config', summary='可在线修改的配置项')
+def get_runtime_config() -> Dict[str, Any]:
+    """列出允许在网页上修改的配置项与当前值（已打码）。
+
+    功能关闭时同样返回 200，但 ``enabled`` 为 false 并附 ``reason`` ——
+    页面需要把"为什么不能改"直接展示出来，而不是只给一个灰按钮。
+    """
+    return {'success': True, **runtime_config.describe()}
+
+
+@router.post('/runtime-config', summary='保存配置到 .env')
+def save_runtime_config(payload: RuntimeConfigUpdate) -> Dict[str, Any]:
+    """把改动写回 ``backend/.env`` 并热更新内存配置（无需重启）。
+
+    两道门：功能开关 + 口令。任一不满足都返回 403，
+    且不泄露"口令错"与"功能没开"之外的任何信息。
+    """
+    status = runtime_config.describe()
+    if not status['enabled']:
+        raise HTTPException(status_code=403, detail=status['reason'])
+    if not runtime_config.check_token(payload.token):
+        raise HTTPException(status_code=403, detail='口令不正确')
+
+    changed, rejected = runtime_config.apply(payload.values)
+
+    if changed:
+        message = f'已写入 {len(changed)} 项，即时生效'
+        if rejected:
+            message += f'；{len(rejected)} 项被拒绝'
+    else:
+        message = '没有需要保存的改动'
+
+    return {
+        'success': True,
+        'changed': changed,
+        'rejected': rejected,
+        'message': message,
+        'config': runtime_config.describe(),
     }
 
 
