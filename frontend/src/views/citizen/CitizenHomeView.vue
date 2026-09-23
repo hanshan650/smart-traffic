@@ -35,7 +35,13 @@ const rank = ref<CongestionRankItem[]>([])
 const loading = ref(true)
 const error = ref('')
 const viewMode = ref<ViewMode>('map')
-
+/**
+ * 数据是否来自演示源。
+ *
+ * 真实数据一条都没有时，后端会拿一批造好的上海事件补位。
+ * 必须把它透给用户 —— 那些坐标是编的，不标出来就与真实路况无异。
+ */
+const isDemo = ref(false)
 /**
  * 用户手动选定的路段。
  *
@@ -130,6 +136,10 @@ async function load(): Promise<void> {
     overview.value = o
     events.value = t.items
     rank.value = r.items
+    // 任一接口标了 demo 就提示。取“或”而不是只看一个，
+    // 因为两边共享同一套判据，理论上一致 —— 而一旦不一致，
+    // 宁可多提示一次，也不要漏掉一次真实数据被演示数据顶替的情况
+    isDemo.value = Boolean(o.demo || t.demo)
     error.value = ''
   } catch (err) {
     error.value = describeError(err).message
@@ -201,12 +211,17 @@ function clearManual(): void {
         :route="route"
         :rank="rank"
         :roads="roads"
+        :demo="isDemo"
         @locate="startGeo"
         @select-road="selectRoad"
       />
 
       <!-- ============================ 列表视图 ============================ -->
       <template v-else>
+        <!-- 演示数据提示放在最前：列表模式没有地图的通栏色条，
+             否则容易被当成真实路况一路读下去 -->
+        <div v-if="isDemo" class="demo-note">演示数据 · 非真实路况</div>
+
         <section
           class="c-card status-card"
           :style="{ background: tone.bg, borderColor: tone.color + '33' }"
@@ -440,6 +455,17 @@ function clearManual(): void {
   display: flex;
   flex-direction: column;
   gap: clamp(8px, 0.5vw + 6px, 12px);
+}
+
+.demo-note {
+  padding: clamp(5px, 0.3vw + 4px, 8px) 12px;
+  border-radius: 10px;
+  background: #f59e0b;
+  color: #fff;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-align: center;
+  letter-spacing: 0.3px;
 }
 
 /*

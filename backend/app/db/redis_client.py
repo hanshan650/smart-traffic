@@ -38,14 +38,37 @@ _PROBE_TTL = 10.0
 _probe_cache: Dict[str, Tuple[float, bool]] = {}
 _probe_lock = threading.Lock()
 
+# 探活失败后的冷却窗口（秒）。窗口内不再重复探活 ——
+# 探活本身要 2 秒，每个请求都付一次比“直接用不了 Redis”还糟。
+_OFFLINE_COOLDOWN = 30.0
+_offline_until = 0.0
+
 
 # ==========================================================================
 # 连接
 # ==========================================================================
 
 def get_redis() -> redis.Redis:
-    """返回进程内共享的 Redis 客户端（decode_responses=True）。"""
+    """返回进程内共享的 Redis 客户端（decode_responses=True）。
+
+    **Redis 不可用时抛 :class:`RedisUnavailable`，而不是返回一个
+    会在使用时阻塞 36 秒的 client。**
+
+    这一点很关键：把预检放在这里而不是每个调用点，是为了让
+    “先探活再使用”成为默认行为 —— 原先只在 ``ping()`` 里做了预检，
+    其他原语直接调 redis-py，结果单次调用阻塞 36～37 秒
+    （详见 :func:`_available` 的说明）。
+
+    抛出而非返回 None，是为了不改变调用方已有的 `except RedisError`
+    降级写法 —— ``RedisUnavailable`` 是 ``RedisError`` 的子类。
+    """
     global _client
+
+    if not _available():
+        raise RedisUnavailable(
+            f'Redis 不可用（{settings.redis_host}:{settings.redis_port}），已跳过'
+        )
+
     if _client is None:
         _client = redis.Redis(
             host=settings.redis_host,
@@ -80,14 +103,58 @@ def _tcp_reachable() -> bool:
         return False
 
 
+class RedisUnavailable(RedisError):
+    """Redis 不可用（预检未通过）。
+
+    继承 ``RedisError`` 是刻意的：所有调用点本来就用
+    ``except RedisError`` 做优雅降级，这样不必逐个改捕获列表，
+    已有的降级行为原样保留。
+    """
+
+
+def _available() -> bool:
+    """统一的可用性预检，**所有原语在触碰 redis-py 之前都必须先过这里**。
+
+    为什么不能只靠 socket_connect_timeout
+    -------------------------------------
+    实测（Redis 未启动，Windows）：
+
+      ``acquire_once`` / ``set_json`` / ``get_json``  各阻塞 **36～37 秒**
+
+    而 client 上明明配了 ``socket_connect_timeout=1.5`` 与
+    ``retry_on_error=[]``。原因是 redis-py 对 ``localhost`` 会先试
+    IPv6 再回退 IPv4，加上内部的连接尝试逻辑，超时参数兜不住这个组合。
+
+    原来的写法只在 ``ping()`` 里做预检，其余原语直接调 redis-py ——
+    于是"处处优雅降级"的设计仍在 `/reports/{no}/review` 上卡了 30 秒
+    （数据其实已经写进 MongoDB，客户端却等不到响应）。
+
+    冷却机制
+    --------
+    探活本身也要 2 秒（同样是双栈解析的代价）。所以失败后进入冷却窗口，
+    窗口内直接返回 False，不再重复探活 —— 否则每个请求都要付这 2 秒。
+    冷却结束后自动重新探活，Redis 恢复后无需重启进程。
+    """
+    global _offline_until
+
+    now = time.monotonic()
+
+    # 已知离线：冷却窗口内不重复探活
+    if now < _offline_until:
+        return False
+
+    ok = _tcp_reachable()
+    if ok:
+        _offline_until = 0.0
+        return True
+
+    _offline_until = now + _OFFLINE_COOLDOWN
+    return False
+
+
 def ping() -> bool:
     """真实连通性探测（不缓存）。"""
-    if not _tcp_reachable():
-        return False
-    try:
-        return bool(get_redis().ping())
-    except (RedisError, OSError):
-        return False
+    return _available()
 
 
 def ping_cached(ttl: float = _PROBE_TTL) -> bool:
@@ -241,8 +308,9 @@ def scan_json_values(
 
     无 Redis 或读取失败时返回空列表，由调用方优雅降级。
     """
-    if not _tcp_reachable():
-        return []
+    # 预检交给 get_redis() 统一做（含离线冷却）。
+    # 这里原先单独调 _tcp_reachable()，那会绕开冷却 ——
+    # 每个请求都付一次 2 秒探活，Redis 挂着时反而比直接失败更慢。
     try:
         client = get_redis()
         pattern = make_key(prefix) + '*'
@@ -275,8 +343,8 @@ def sadd_members(key: str, members: List[str]) -> None:
 
 def smembers(key: str) -> List[str]:
     """读取索引集合。无 Redis 时返回空列表。"""
-    if not _tcp_reachable():
-        return []
+    # 同 scan_json_values：预检统一由 get_redis() 负责，
+    # 否则冷却机制会被绕过，每次调用都要重新探活
     try:
         return [str(item) for item in get_redis().smembers(make_key(key))]
     except (RedisError, OSError):

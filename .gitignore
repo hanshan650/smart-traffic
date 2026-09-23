@@ -128,3 +128,10 @@ dev-dist/
 # 验证脚本的中间产物（esbuild 把 .ts 打包成 .mjs 供 node 直接执行）
 # 用 **/ 前缀：带斜杠的模式会锚定到本文件所在目录，而实际路径是 frontend/scripts/
 **/scripts/.tmp/
+
+# 调试截图。用手机/浏览器抓的临时图，下划线前缀标识"随时会覆盖" ——
+# 它们体积大且没有长期价值，误提交过两次（连同 .commit-msg.tmp）
+**/scripts/_*.png
+**/scripts/_*.jpg
+.commit-msg.tmp
+.git-commit-msg.tmp

@@ -39,7 +39,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from starlette.concurrency import run_in_threadpool
@@ -47,7 +47,7 @@ from starlette.concurrency import run_in_threadpool
 from app.core.config import settings
 from app.db import redis_client
 from app.models.schemas import EventStatus
-from app.services import citizen_report_service, event_service
+from app.services import citizen_report_service, demo_data_service, event_service
 from app.services.citizen_report_service import CitizenReportError
 
 router = APIRouter(prefix='/public', tags=['民众端'])
@@ -160,6 +160,34 @@ def _congestion_snapshots(limit: int = 50) -> List[Dict[str, Any]]:
     return snapshots[:limit]
 
 
+def _visible_events(limit: int) -> Tuple[List[Any], bool]:
+    """取对外可见的事件，返回 ``(事件列表, 是否含演示数据)``。
+
+    **只有在真实事件一条都没有时，才用演示数据补位。**
+    判据集中在 :func:`demo_data_service.should_serve` 里
+    （配置开关 + events 集合是否为空），这里不再重复判断 ——
+    两处各写一遍规则，迟早会不一致。
+
+    第二个返回值会一路带到响应体的 ``demo`` 字段。这是必须的：
+    演示数据的坐标与描述都是编的，若不标出来，前端与用户都无法区分
+    它和真实路况 —— 而把编的位置当成真实路况发布，比“看不到效果”严重得多。
+    """
+    events: List[Any] = []
+    for status in (EventStatus.CONFIRMED, EventStatus.PENDING):
+        # list_events 返回 (总数, 列表) 元组，不是列表
+        _total, items = event_service.list_events(status=status, limit=limit)
+        events.extend(items)
+
+    if events:
+        return events, False
+
+    serving, _reason = demo_data_service.should_serve()
+    if serving:
+        return demo_data_service.demo_events(limit=limit), True
+
+    return [], False
+
+
 # ==========================================================================
 # 路况
 # ==========================================================================
@@ -174,12 +202,10 @@ def public_traffic(
 
     只返回已确认或待复核的**非误报**事件 —— 误报（``rejected``）
     与已归档的不应出现在面向公众的信息流里。
+
+    真实数据为空时会用演示数据补位，此时响应里的 ``demo`` 为 true。
     """
-    events: List[Any] = []
-    for status in (EventStatus.CONFIRMED, EventStatus.PENDING):
-        # list_events 返回 (总数, 列表) 元组，不是列表
-        _total, items = event_service.list_events(status=status, limit=limit)
-        events.extend(items)
+    events, demo = _visible_events(limit)
 
     if level:
         events = [item for item in events if item.level.value == level]
@@ -192,6 +218,7 @@ def public_traffic(
         'success': True,
         'total': len(items),
         'items': items,
+        'demo': demo,
         'generatedAt': datetime.utcnow().isoformat(),
     }
 
@@ -213,12 +240,10 @@ def public_overview() -> Dict[str, Any]:
     ``/traffic`` 里已经有了，概览的作用是让人一眼看出"今天路况如何"。
     """
     counts = {'critical': 0, 'warning': 0, 'info': 0}
-    for status in (EventStatus.CONFIRMED, EventStatus.PENDING):
-        # 注意：list_events 返回 (总数, 列表) 元组 —— 不解包会直接抛错
-        _total, items = event_service.list_events(status=status, limit=200)
-        for item in items:
-            key = item.level.value
-            counts[key] = counts.get(key, 0) + 1
+    events, demo = _visible_events(200)
+    for item in events:
+        key = item.level.value
+        counts[key] = counts.get(key, 0) + 1
 
     congestion = {'normal': 0, 'light': 0, 'moderate': 0, 'heavy': 0}
     for item in _congestion_snapshots(100):
@@ -244,6 +269,7 @@ def public_overview() -> Dict[str, Any]:
         'eventCounts': counts,
         'eventTotal': total,
         'congestionCounts': congestion,
+        'demo': demo,
         'generatedAt': datetime.utcnow().isoformat(),
     }
 

@@ -87,6 +87,17 @@ export default defineConfig({
     },
   },
   server: {
+    /*
+      监听所有网卡，手机才能在同一局域网内真机预览。
+      默认只绑 localhost（实测绑到 ::1 这个 IPv6 回环），手机连不上。
+
+      注意 proxy 的 target 仍然写 127.0.0.1：那是 Vite 服务进程自己去连后端，
+      与"谁可以连 Vite"无关，改监听地址不影响它。
+
+      开发者机器上开着这个没问题；如果要长期对外开放，
+      记得局域网里任何人都能访问 /api（含 AMAP Key 的运行时配置）。
+    */
+    host: true,
     port: 5173,
     proxy: {
       // WebSocket 实时推送。
