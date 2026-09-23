@@ -117,6 +117,41 @@ const activeName = computed(() => route.name as string)
   --c-radius: 14px;
   --c-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 6px 18px rgba(15, 23, 42, 0.05);
 
+  /*
+    字号阶梯
+    ========
+    民众端是移动优先设计的，字号按手机定（11～17px）。但用户也可能在
+    桌面宽屏上打开 —— 视口宽度可能是手机的 2～3 倍，而固定 px 字号
+    不会跟着变，结果是一大片界面配着手机尺寸的小字，读起来很吃力。
+
+    统一走变量、按视口宽度整档调整，而不是让每个组件自己写一遍媒体查询：
+    后者迟早会出现"某个卡片还是手机字号"的不一致。
+
+    取值参考：桌面浏览器正文不小于 16px，次要信息不小于 13px，
+    说明性文字（口径、图注）可以到 12px —— 再小在 1080p 上就费眼了。
+  */
+  --fs-xs: 10px;   /* 口径说明、图注 */
+  --fs-sm: 11px;   /* 次要信息：时间、元数据 */
+  --fs-base: 12px; /* 正文 */
+  --fs-md: 14px;   /* 小标题、重点值 */
+  --fs-lg: 16px;   /* 主标题 */
+  --fs-xl: 22px;   /* 大号数字 */
+  /*
+    输入框专用。**任何断点下都不得低于 16px**：
+    iOS Safari 在字号小于 16px 的输入框获得焦点时会自动放大整个页面，
+    且不会自动缩回。所以它不能跟着 --fs-md 走（线上在窄屏是 15px）。
+    宁可输入框比其他文字大一点，也不能让用户每次点输入框都得双指缩回来。
+  */
+  --fs-input: 16px;
+
+  /*
+    地图标记的尺寸也跟着字号走。
+    必须单独给变量：标记的 HTML 是高德插入的，只能走内联样式，
+    用不了 var() —— 由 RouteMap 在绘制时读取这两个值再拼进 HTML。
+  */
+  --pin-size: 26px;
+  --pin-font: 13px;
+
   min-height: 100vh;
   background: var(--c-bg);
   color: var(--c-text);
@@ -124,8 +159,66 @@ const activeName = computed(() => route.name as string)
   flex-direction: column;
   font-family: system-ui, -apple-system, 'Segoe UI', 'PingFang SC',
     'Microsoft YaHei', sans-serif;
+  font-size: var(--fs-base);
   /* 移动端底部 Tab 会盖住内容，留出安全间距 */
   padding-bottom: 64px;
+}
+
+/*
+  手机端：锁定视口高度，滚动交给内容区
+  ======================================
+  原先整页随内容高度增长，手机上一律产生纵向滚动 —— 导航类界面里
+  这很难用：想拖地图却把页面拖走了，顶部路段条与底部 Tab 也跟着跑。
+
+  改成 App 式布局：外壳固定一屏高，只有 .c-main 自己滚。
+  地图页里 .c-main 的内容正好撑满，所以连它也不滚。
+
+  用 dvh 而非 vh：移动端地址栏收起时 vh 不更新，底部会露一截。
+*/
+@media (max-width: 767px) {
+  .citizen-shell {
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+    /*
+      给底部 Tab 留出高度，不能设成 0。
+      Tab 是 fixed 浮在页面上，设 0 会让 .c-main 延伸到它下面 ——
+      而地图的事件栏就在地图底部，会被 Tab 正好盖住。
+      实测：设 0 时地图 727px 高、底边 834px，与 Tab 的 794~844 重叠 40px。
+      Tab 自身另有 safe-area 内边距，这里同步加上。
+    */
+    padding-bottom: calc(50px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (min-width: 768px) {
+  .citizen-shell {
+    --fs-xs: 13px;
+    --fs-sm: 14px;
+    --fs-base: 15px;
+    --fs-md: 17px;
+    --fs-lg: 19px;
+    --fs-xl: 30px;
+    --pin-size: 30px;
+    --pin-font: 15px;
+    --fs-input: 17px;
+    padding-bottom: 0;
+  }
+}
+
+@media (min-width: 1200px) {
+  .citizen-shell {
+    --fs-xs: 14px;
+    --fs-sm: 15px;
+    --fs-base: 16px;
+    --fs-md: 18px;
+    --fs-lg: 21px;
+    --fs-xl: 34px;
+    --pin-size: 32px;
+    --pin-font: 16px;
+    --fs-input: 18px;
+  }
 }
 
 /* ------------------------------------------------------------------ 顶部 */
@@ -160,15 +253,15 @@ const activeName = computed(() => route.name as string)
   background: var(--c-primary);
   color: #fff;
   font-weight: 700;
-  font-size: 17px;
+  font-size: var(--fs-lg);
 }
 .c-brand strong {
   display: block;
-  font-size: 15px;
+  font-size: var(--fs-md);
   line-height: 1.25;
 }
 .c-tagline {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--c-text-faint);
 }
 
@@ -179,7 +272,7 @@ const activeName = computed(() => route.name as string)
 .c-nav-link {
   padding: 7px 13px;
   border-radius: 9px;
-  font-size: 13px;
+  font-size: var(--fs-base);
   color: var(--c-text-dim);
   text-decoration: none;
   transition: background 0.15s, color 0.15s;
@@ -200,10 +293,29 @@ const activeName = computed(() => route.name as string)
 
 .c-main {
   flex: 1;
+  /*
+    min-height: 0 不能省。flex item 默认 min-height:auto，
+    内容超高时它会拒绝收缩，子元素的 flex 撑满就失效了。
+  */
+  min-height: 0;
   width: 100%;
   max-width: 980px;
   margin: 0 auto;
   padding: 14px 16px 24px;
+  /* 整页不滚，滚动发生在这里 */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 767px) {
+  /*
+    手机端收紧内边距。
+    地图页里这 16px 加上下留白就是地图与屏幕边缘的距离，
+    而地图是这个页面的主体，不该被外壳的排版留白吃掉。
+  */
+  .c-main {
+    padding: 8px 10px 10px;
+  }
 }
 
 .c-footer {
@@ -212,7 +324,7 @@ const activeName = computed(() => route.name as string)
   justify-content: center;
   gap: 14px;
   padding: 10px 16px 18px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--c-text-faint);
   flex-wrap: wrap;
 }
@@ -248,7 +360,7 @@ const activeName = computed(() => route.name as string)
   padding: 7px 2px 6px;
   text-decoration: none;
   color: var(--c-text-faint);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   /* 触摸目标不小于 44px，符合移动端可点击区域建议 */
   min-height: 48px;
   justify-content: center;
@@ -258,7 +370,7 @@ const activeName = computed(() => route.name as string)
   font-weight: 600;
 }
 .c-tab-icon {
-  font-size: 17px;
+  font-size: var(--fs-lg);
   line-height: 1.1;
 }
 
@@ -276,6 +388,39 @@ const activeName = computed(() => route.name as string)
   }
   .c-main {
     padding: 22px 16px 32px;
+  }
+}
+
+/*
+  窄屏覆盖必须放在样式表**最末尾**
+  ==================================
+  同特异性的声明只看书写顺序，与是否包在媒体查询里无关。
+  这些规则一旦放在被覆盖项前面就会静默失效（已经踩过一次，见下）。
+*/
+@media (max-width: 767px) {
+  /*
+    窄屏隐藏顶部品牌条。
+    底部 Tab 已经承担了导航，顶部这条只剩品牌标识 —— 却占着 56px。
+    在一个以地图为主体的页面上，这 56px 直接换算成地图面积。
+
+    不丢信息：各页面自己都有标题（"路上遇到什么情况？"等），
+    PWA 安装后从桌面图标进入，用户也知道这是哪个应用。
+  */
+  .c-header {
+    display: none;
+  }
+  /*
+    窄屏隐藏页脚。
+    它处在底部 Tab 的同一区域（实测 footer 795~842、Tab 795~845），
+    已被完全盖住，却仍占着 43px 的高度 —— 这部分正是从地图身上抢走的。
+    内容"数据来自监测点"在地图的口径说明里已经写过，不必两处都留。
+
+    注意：这条规则曾经写在上面的 .c-footer 定义**之前**，于是被
+    `display: flex` 覆盖，页脚照旧占位 —— 本次就是靠测量 clientHeight
+    比预期少 43px 才发现的。
+  */
+  .c-footer {
+    display: none;
   }
 }
 </style>

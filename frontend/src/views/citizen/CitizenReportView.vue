@@ -298,21 +298,21 @@ function goTrack(): void {
 
 .c-title {
   margin: 0 0 4px;
-  font-size: 16px;
+  font-size: var(--fs-lg);
 }
 .c-sub {
   margin: 0 0 12px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--c-text-dim);
   line-height: 1.6;
 }
 .c-sub.small {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   margin-bottom: 8px;
 }
 .c-section-title {
   margin: 0 0 4px;
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 600;
   color: var(--c-text-dim);
 }
@@ -330,7 +330,7 @@ function goTrack(): void {
   border-radius: 11px;
   background: var(--c-surface-2);
   color: var(--c-text);
-  font-size: 13px;
+  font-size: var(--fs-base);
   cursor: pointer;
   transition: all 0.15s;
   /* 移动端点按目标高度 */
@@ -361,12 +361,12 @@ function goTrack(): void {
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 5px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--c-text-dim);
 }
 .field-label em {
   font-style: normal;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--c-text-faint);
 }
 .field-label em.warn {
@@ -385,7 +385,7 @@ function goTrack(): void {
     会自动放大整个页面且不会自动缩回，用户得手动双指缩回来。
     不能改用 user-scalable=no 规避 —— 那会挡住需要放大文字的用户。
   */
-  font-size: 16px;
+  font-size: var(--fs-input);
   font-family: inherit;
   resize: vertical;
   box-sizing: border-box;
@@ -404,7 +404,7 @@ function goTrack(): void {
   flex-wrap: wrap;
 }
 .locate-hint {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--c-text-faint);
 }
 
@@ -423,12 +423,12 @@ function goTrack(): void {
   cursor: pointer;
 }
 .upload-icon {
-  font-size: 22px;
+  font-size: var(--fs-xl);
   color: var(--c-text-faint);
   line-height: 1;
 }
 .upload-text {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--c-text-faint);
 }
 .file-input {
@@ -457,7 +457,7 @@ function goTrack(): void {
   border-radius: 12px;
   background: var(--c-primary);
   color: #fff;
-  font-size: 15px;
+  font-size: var(--fs-md);
   font-weight: 600;
   cursor: pointer;
   box-shadow: var(--c-shadow);
@@ -474,7 +474,7 @@ function goTrack(): void {
 .limit-note,
 .privacy-note {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--c-text-faint);
   line-height: 1.6;
   text-align: center;
@@ -485,7 +485,7 @@ function goTrack(): void {
 
 .error-box {
   color: var(--c-danger);
-  font-size: 13px;
+  font-size: var(--fs-base);
   background: #fef2f2;
   border-color: #fecaca;
 }
@@ -496,12 +496,12 @@ function goTrack(): void {
   border-radius: 10px;
   background: var(--c-surface);
   color: var(--c-text);
-  font-size: 13px;
+  font-size: var(--fs-base);
   cursor: pointer;
 }
 .c-btn.small {
   padding: 6px 12px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 .c-btn.primary {
   background: var(--c-primary);
@@ -527,17 +527,17 @@ function goTrack(): void {
   border-radius: 50%;
   background: var(--c-ok);
   color: #fff;
-  font-size: 28px;
+  font-size: var(--fs-xl);
   display: grid;
   place-items: center;
 }
 .success-card h2 {
   margin: 0 0 5px;
-  font-size: 17px;
+  font-size: var(--fs-lg);
 }
 .success-sub {
   margin: 0 0 16px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--c-text-dim);
   line-height: 1.6;
 }
@@ -551,12 +551,12 @@ function goTrack(): void {
 }
 .code-label {
   display: block;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--c-text-dim);
   margin-bottom: 3px;
 }
 .code-value {
-  font-size: 20px;
+  font-size: var(--fs-lg);
   font-family: var(--font-mono, ui-monospace, monospace);
   letter-spacing: 1px;
   color: var(--c-primary);
@@ -564,7 +564,7 @@ function goTrack(): void {
 
 .success-tip {
   margin: 0 0 16px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--c-text-dim);
   line-height: 1.7;
   text-align: left;

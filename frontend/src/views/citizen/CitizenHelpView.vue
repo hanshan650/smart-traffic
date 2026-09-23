@@ -101,7 +101,7 @@ onMounted(async () => {
 }
 .alert-text {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--fs-base);
   line-height: 1.7;
   color: #7f1d1d;
 }
@@ -111,11 +111,11 @@ onMounted(async () => {
 
 .c-title {
   margin: 0 0 4px;
-  font-size: 16px;
+  font-size: var(--fs-lg);
 }
 .c-sub {
   margin: 0 0 12px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--c-text-dim);
 }
 
@@ -123,7 +123,7 @@ onMounted(async () => {
   padding: 20px;
   text-align: center;
   color: var(--c-text-faint);
-  font-size: 13px;
+  font-size: var(--fs-base);
 }
 
 /* ---------------------------------------------------------------- 电话列表 */
@@ -150,17 +150,17 @@ onMounted(async () => {
 }
 .contact-name {
   display: block;
-  font-size: 14px;
+  font-size: var(--fs-md);
   font-weight: 600;
 }
 .contact-note {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--c-text-faint);
 }
 .contact-number {
   flex: 0 0 auto;
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 19px;
+  font-size: var(--fs-lg);
   font-weight: 700;
   color: var(--c-primary);
   text-decoration: none;
@@ -187,7 +187,7 @@ onMounted(async () => {
 }
 .tip-summary {
   padding: 11px 13px;
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 600;
   cursor: pointer;
   background: var(--c-surface-2);
@@ -203,7 +203,7 @@ onMounted(async () => {
   position: absolute;
   right: 13px;
   color: var(--c-text-faint);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 .tip[open] .tip-summary::after {
   content: '▴';
@@ -211,7 +211,7 @@ onMounted(async () => {
 .tip-steps {
   margin: 0;
   padding: 11px 13px 11px 30px;
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   color: var(--c-text-dim);
   line-height: 1.85;
 }
@@ -222,7 +222,7 @@ onMounted(async () => {
 
 .footer-note {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--c-text-faint);
   text-align: center;
   line-height: 1.6;

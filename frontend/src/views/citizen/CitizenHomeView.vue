@@ -160,7 +160,7 @@ function clearManual(): void {
 </script>
 
 <template>
-  <div class="home">
+  <div class="home" :class="{ fill: viewMode === 'map' }">
     <div v-if="loading" class="c-card placeholder">正在获取路况…</div>
 
     <div v-else-if="error" class="c-card error-box">
@@ -426,8 +426,9 @@ function clearManual(): void {
         </section>
       </template>
 
-      <!-- 免责声明在两种视图下都保留：它是合规要求，不随展示形式变化 -->
-      <p class="disclaimer">
+      <!-- 免责声明只在列表视图显示：地图视图里同一条口径说明已经写在
+       底部事件栏中，两处都放会重复占用手机屏幕 -->
+      <p v-if="viewMode === 'list'" class="disclaimer">
         以上信息来自高速监测点自动采集，可能存在延迟或误差。距离为直线估算，非沿路里程。出行请以实际路况与交管部门发布为准。
       </p>
     </template>
@@ -441,6 +442,25 @@ function clearManual(): void {
   gap: 12px;
 }
 
+/*
+  地图模式：占满 .c-main 的可用高度。
+
+  手机上这一页就是一张地图，页面不该滚动 —— 想拖动地图却把整页
+  拖走了是最影响使用的问题。外壳已经锁定一屏高（见 CitizenLayout），
+  这里让地图自己撑满剩下的空间，于是连 .c-main 也不会溢出。
+
+  只在窄屏做：宽屏下 .citizen-shell 是 min-height 而非固定高，
+  height: 100% 拿不到可用高度，地图会塌成 0。
+*/
+@media (max-width: 767px) {
+  .home.fill {
+    height: 100%;
+    gap: 8px;
+    /* 地图撑满时不应再把外层撑出滚动条 */
+    min-height: 0;
+  }
+}
+
 .c-card {
   padding: 14px 16px;
   background: var(--c-surface);
@@ -452,7 +472,7 @@ function clearManual(): void {
 .placeholder {
   text-align: center;
   color: var(--c-text-faint);
-  font-size: 13px;
+  font-size: var(--fs-base);
   padding: 32px 16px;
 }
 
@@ -463,13 +483,13 @@ function clearManual(): void {
 }
 .error-box p {
   margin: 0 0 10px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--c-text-dim);
 }
 
 .c-section-title {
   margin: 0 0 10px;
-  font-size: 13px;
+  font-size: var(--fs-md);
   font-weight: 600;
   color: var(--c-text-dim);
 }
@@ -490,17 +510,17 @@ function clearManual(): void {
   display: grid;
   place-items: center;
   color: #fff;
-  font-size: 20px;
+  font-size: var(--fs-lg);
   font-weight: 700;
 }
 .status-card h2 {
   margin: 0;
-  font-size: 17px;
+  font-size: var(--fs-lg);
   line-height: 1.3;
 }
 .status-sub {
   margin: 3px 0 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--c-text-dim);
 }
 
@@ -521,11 +541,11 @@ function clearManual(): void {
   border-radius: 50%;
 }
 .myroad-head strong {
-  font-size: 15px;
+  font-size: var(--fs-md);
   color: var(--c-text);
 }
 .myroad-status {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 .myroad-reset {
@@ -535,17 +555,17 @@ function clearManual(): void {
   border-radius: 8px;
   background: none;
   color: var(--c-text-dim);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   cursor: pointer;
 }
 .myroad-sub {
   margin: 5px 0 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--c-text-dim);
 }
 .myroad-warn {
   margin: 5px 0 0;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--c-warn);
 }
 
@@ -553,12 +573,12 @@ function clearManual(): void {
 
 .geo-card strong {
   display: block;
-  font-size: 14px;
+  font-size: var(--fs-md);
   color: var(--c-text);
 }
 .geo-card p {
   margin: 4px 0 10px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.6;
   color: var(--c-text-dim);
 }
@@ -580,13 +600,13 @@ function clearManual(): void {
 }
 .stat-value {
   display: block;
-  font-size: 24px;
+  font-size: var(--fs-xl);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1.1;
 }
 .stat-label {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--c-text-faint);
 }
 
@@ -599,7 +619,7 @@ function clearManual(): void {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 .congestion-dot {
   width: 9px;
@@ -641,7 +661,7 @@ function clearManual(): void {
   border-radius: 7px;
   background: var(--c-surface-2);
   color: var(--c-text-faint);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 .rank-no.top {
@@ -654,20 +674,20 @@ function clearManual(): void {
 }
 .rank-name {
   display: block;
-  font-size: 13px;
+  font-size: var(--fs-base);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .rank-meta {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--c-text-faint);
 }
 .rank-badge {
   flex: 0 0 auto;
   padding: 2px 9px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
 }
 
@@ -707,17 +727,17 @@ function clearManual(): void {
   gap: 10px;
 }
 .event-type {
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 600;
 }
 .event-time {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--c-text-faint);
   white-space: nowrap;
 }
 .event-dist {
   flex: 0 0 auto;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--c-primary);
   white-space: nowrap;
@@ -728,12 +748,12 @@ function clearManual(): void {
 }
 .event-road {
   margin: 2px 0 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--c-text-dim);
 }
 .event-desc {
   margin: 2px 0 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--c-text-faint);
   line-height: 1.5;
 }
@@ -745,26 +765,26 @@ function clearManual(): void {
 }
 .passed-title {
   margin-bottom: 2px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--c-text-faint);
 }
 
 .empty-inline {
   padding: 18px 0;
   text-align: center;
-  font-size: 13px;
+  font-size: var(--fs-base);
   color: var(--c-text-faint);
 }
 
 .unlocated-note {
   margin: 10px 0 0;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--c-text-faint);
 }
 
 .disclaimer {
   margin: 2px 0 0;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--c-text-faint);
   line-height: 1.6;
   text-align: center;
@@ -788,10 +808,22 @@ function clearManual(): void {
   border-radius: 8px;
   background: none;
   color: var(--c-text-dim);
-  font-size: 13px;
+  font-size: var(--fs-base);
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
   min-height: 38px;
+}
+
+@media (max-width: 767px) {
+  /* 手机端把切换条压到最矮：它只是入口，不该跟地图抢纵向空间 */
+  .view-switch {
+    padding: 2px;
+    border-radius: 9px;
+  }
+  .switch-btn {
+    padding: 5px;
+    min-height: 30px;
+  }
 }
 .switch-btn.active {
   background: var(--c-primary-soft);
@@ -805,7 +837,7 @@ function clearManual(): void {
   border-radius: 9px;
   background: var(--c-surface);
   color: var(--c-text);
-  font-size: 13px;
+  font-size: var(--fs-base);
   cursor: pointer;
   min-height: 36px;
 }

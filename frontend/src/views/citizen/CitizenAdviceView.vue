@@ -118,17 +118,17 @@ onMounted(load)
 
 .c-title {
   margin: 0 0 4px;
-  font-size: 16px;
+  font-size: var(--fs-lg);
 }
 .c-sub {
   margin: 0 0 10px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--c-text-dim);
   line-height: 1.6;
 }
 .c-section-title {
   margin: 0 0 10px;
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 600;
   color: var(--c-text-dim);
 }
@@ -139,7 +139,7 @@ onMounted(load)
 }
 .disclaimer {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--c-text-dim);
   line-height: 1.7;
   padding-top: 9px;
@@ -150,7 +150,7 @@ onMounted(load)
 .empty-box {
   text-align: center;
   color: var(--c-text-faint);
-  font-size: 13px;
+  font-size: var(--fs-base);
 }
 .placeholder {
   padding: 32px 16px;
@@ -160,7 +160,7 @@ onMounted(load)
 }
 .empty-icon {
   display: block;
-  font-size: 26px;
+  font-size: var(--fs-xl);
   color: var(--c-ok);
   margin-bottom: 6px;
 }
@@ -171,12 +171,12 @@ onMounted(load)
 }
 .empty-box p {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .error-box {
   color: var(--c-danger);
-  font-size: 13px;
+  font-size: var(--fs-base);
   background: #fef2f2;
   border-color: #fecaca;
 }
@@ -214,7 +214,7 @@ onMounted(load)
   gap: 8px;
 }
 .avoid-name {
-  font-size: 14px;
+  font-size: var(--fs-md);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -222,24 +222,24 @@ onMounted(load)
 }
 .avoid-badge {
   flex: 0 0 auto;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 .avoid-suggestion {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--c-text-dim);
 }
 .avoid-meta {
   margin: 2px 0 0;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--c-text-faint);
 }
 
 .tips {
   margin: 0;
   padding-left: 18px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--c-text-dim);
   line-height: 1.9;
 }

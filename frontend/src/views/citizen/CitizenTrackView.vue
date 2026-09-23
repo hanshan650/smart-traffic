@@ -166,17 +166,17 @@ onMounted(() => {
 
 .c-title {
   margin: 0 0 4px;
-  font-size: 16px;
+  font-size: var(--fs-lg);
 }
 .c-sub {
   margin: 0 0 12px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--c-text-dim);
   line-height: 1.6;
 }
 .c-section-title {
   margin: 0 0 10px;
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 600;
   color: var(--c-text-dim);
 }
@@ -193,7 +193,7 @@ onMounted(() => {
   background: var(--c-surface);
   color: var(--c-text);
   /* ≥ 16px，避免 iOS 聚焦时自动放大页面 */
-  font-size: 16px;
+  font-size: var(--fs-input);
   font-family: var(--font-mono, ui-monospace, monospace);
   letter-spacing: 1px;
   box-sizing: border-box;
@@ -206,7 +206,7 @@ onMounted(() => {
 
 .error-text {
   margin: 10px 0 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--c-danger);
 }
 
@@ -222,14 +222,14 @@ onMounted(() => {
 }
 .result-no {
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 16px;
+  font-size: var(--fs-md);
   font-weight: 600;
   letter-spacing: 0.5px;
 }
 .result-status {
   padding: 3px 11px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 
@@ -257,7 +257,7 @@ onMounted(() => {
   z-index: 1;
 }
 .stage-label {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--c-text-faint);
 }
 .stage.done .stage-label {
@@ -290,19 +290,19 @@ onMounted(() => {
 }
 .review-label {
   display: block;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--c-text-faint);
   margin-bottom: 3px;
 }
 .review-text {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--fs-base);
   line-height: 1.6;
 }
 .review-time {
   display: block;
   margin-top: 5px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--c-text-faint);
 }
 
@@ -316,7 +316,7 @@ onMounted(() => {
   gap: 10px;
   padding: 7px 0;
   border-bottom: 1px solid var(--c-border);
-  font-size: 13px;
+  font-size: var(--fs-base);
 }
 .detail-list > div:last-child {
   border-bottom: none;
@@ -324,7 +324,7 @@ onMounted(() => {
 .detail-list dt {
   flex: 0 0 68px;
   color: var(--c-text-faint);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 .detail-list dd {
   margin: 0;
@@ -335,7 +335,7 @@ onMounted(() => {
 }
 .mono {
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .report-image {
@@ -347,7 +347,7 @@ onMounted(() => {
 
 .hint {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--c-text-faint);
   text-align: center;
   line-height: 1.6;
@@ -359,7 +359,7 @@ onMounted(() => {
   border-radius: 10px;
   background: var(--c-surface);
   color: var(--c-text);
-  font-size: 14px;
+  font-size: var(--fs-md);
   cursor: pointer;
   white-space: nowrap;
 }
