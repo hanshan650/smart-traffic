@@ -184,6 +184,16 @@ class TrafficEvent(CamelModel):
     snapshot_url: str = ''
     vehicle_count: int = 0
     congestion_level: CongestionLevel = CongestionLevel.NORMAL
+    # 事件坐标（WGS84/GCJ-02 取决于上游，本项目统一按 GCJ-02 处理）。
+    #
+    # 事件在数据模型里**自带坐标**而不是靠摄像头反查，原因有两个：
+    #   1. 公开接口（民众端）不能返回摄像头列表，也就无从反查；
+    #   2. 摄像头检索接口是按视野随机抽样的，本来就无法按编号回查。
+    #
+    # 可选且默认为 None：既有文档里没有这两个字段，
+    # 设为必填会让历史数据读取直接报错。
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     reviewed_at: Optional[datetime] = None
     reviewed_by: Optional[str] = None

@@ -323,6 +323,38 @@ def main() -> int:
             f"eventId={reviewed.get('eventId')}",
         )
 
+        # 坐标必须从上报透传到事件，否则地图上无法定位。
+        # 事件坐标是后加进数据模型的（此前靠反查摄像头），
+        # 公开接口又拿不到摄像头列表，所以这条链路必须有人盯着。
+        if reviewed.get('eventId'):
+            event = requests.get(
+                f"{BASE}/events/{reviewed['eventId']}", timeout=30
+            ).json()
+            check(
+                '上报坐标已透传到事件',
+                event.get('latitude') == 34.74661 and event.get('longitude') == 113.62544,
+                f"事件坐标={event.get('latitude')}, {event.get('longitude')}",
+            )
+
+            # 公开接口应当给出降精度后的坐标（约百米级）
+            public_traffic = requests.get(f'{BASE}/public/traffic', timeout=30).json()
+            located = [
+                item for item in public_traffic['items']
+                if item.get('latitude') is not None
+            ]
+            if located:
+                sample = located[0]
+                check(
+                    '公开接口的坐标已降精度',
+                    sample['latitude'] == round(sample['latitude'], 3),
+                    f"坐标={sample['latitude']}, {sample['longitude']}",
+                )
+                check(
+                    '公开事件仍不含内部字段',
+                    'cameraId' not in sample and 'snapshotUrl' not in sample,
+                    f"字段={sorted(sample.keys())}",
+                )
+
     # 重复复核
     again = requests.post(
         f'{BASE}/reports/{report_no}/review',

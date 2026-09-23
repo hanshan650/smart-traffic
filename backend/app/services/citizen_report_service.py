@@ -526,6 +526,10 @@ def review_report(
                 source_key='citizen',
                 snapshot_url=report.image_url,
                 throttle_seconds=0,      # 人工已确认，不套用自动限流
+                # 带上上报时的坐标，让事件能在地图上定位。
+                # 上报人未提供定位时为 None，地图会跳过该点。
+                latitude=report.latitude,
+                longitude=report.longitude,
             )
             event_id = event.id if event else ''
         except RuntimeError:

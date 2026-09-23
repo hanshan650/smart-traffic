@@ -101,6 +101,10 @@ def _public_event(event: Any) -> Dict[str, Any]:
     白名单式构造 —— 逐个挑出可公开的字段，而不是从完整字典里删除敏感字段。
     这样将来内部事件结构新增字段时，**默认不会被带出去**，
     安全性随字段增加而不会退化。
+
+    坐标经过降精度（见 :func:`_round_coordinate`），且仅用于在地图上
+    标出大致位置。事件数据在模型层面就自带坐标，不靠反查摄像头 ——
+    公开接口本来也不允许返回摄像头列表。
     """
     return {
         'eventType': event.event_type.value,
@@ -114,6 +118,8 @@ def _public_event(event: Any) -> Dict[str, Any]:
         'congestionLabel': CONGESTION_LABEL.get(
             event.congestion_level.value, event.congestion_level.value
         ),
+        'latitude': _round_coordinate(event.latitude),
+        'longitude': _round_coordinate(event.longitude),
         'createdAt': event.created_at.isoformat() if event.created_at else None,
     }
 
@@ -131,6 +137,8 @@ def _public_rank_item(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         'vehicleCount': snapshot.get('totalVehicles', 0),
         'congestionLevel': level,
         'congestionLabel': CONGESTION_LABEL.get(level, level),
+        'latitude': _round_coordinate(snapshot.get('latitude')),
+        'longitude': _round_coordinate(snapshot.get('longitude')),
         'updatedAt': snapshot.get('updatedAt'),
     }
 
@@ -268,6 +276,8 @@ def public_advice(limit: int = Query(5, ge=1, le=20)) -> Dict[str, Any]:
             'congestionLevel': level_value,
             'congestionLabel': CONGESTION_LABEL.get(level_value, level_value),
             'vehicleCount': item.get('totalVehicles', 0),
+            'latitude': _round_coordinate(item.get('latitude')),
+            'longitude': _round_coordinate(item.get('longitude')),
             'suggestion': (
                 '建议提前规划替代路线'
                 if level_value == 'heavy'

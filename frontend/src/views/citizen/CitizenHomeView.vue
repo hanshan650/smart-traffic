@@ -17,15 +17,23 @@ import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 
 import { publicApi } from '@/api/citizen'
 import { describeError } from '@/api/client'
+import CongestionMap from '@/components/citizen/CongestionMap.vue'
 import { CITIZEN_CONGESTION_COLOR, CITIZEN_LEVEL_COLOR } from '@/types/citizen'
 import { relativeTime } from '@/utils/time'
 import type { CongestionRankItem, PublicEvent, PublicOverview } from '@/types/citizen'
+
+/** 视图模式。做成切换而非两个 tab：路况信息一套，展示形式两种。 */
+type ViewMode = 'list' | 'map'
 
 const overview = ref<PublicOverview | null>(null)
 const events = ref<PublicEvent[]>([])
 const rank = ref<CongestionRankItem[]>([])
 const loading = ref(true)
 const error = ref('')
+const viewMode = ref<ViewMode>('list')
+
+// 地图与列表共用同一份数据；切到地图时不必重新请求
+const mapRank = computed(() => rank.value)
 
 let timer: number | undefined
 
@@ -131,8 +139,29 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
+      <!-- 视图切换 -->
+      <div class="view-switch">
+        <button
+          class="switch-btn"
+          :class="{ active: viewMode === 'list' }"
+          @click="viewMode = 'list'"
+        >
+          ☰ 列表
+        </button>
+        <button
+          class="switch-btn"
+          :class="{ active: viewMode === 'map' }"
+          @click="viewMode = 'map'"
+        >
+          ◉ 地图
+        </button>
+      </div>
+
+      <!-- 地图视图 -->
+      <CongestionMap v-if="viewMode === 'map'" :rank="mapRank" :events="events" />
+
       <!-- 拥堵排行 -->
-      <section v-if="rank.length" class="c-card">
+      <section v-if="viewMode === 'list' && rank.length" class="c-card">
         <h3 class="c-section-title">车流最集中的路段</h3>
         <ul class="rank-list">
           <li v-for="(item, index) in rank" :key="index" class="rank-item">
@@ -426,6 +455,36 @@ onBeforeUnmount(() => {
   color: var(--c-text-faint);
   line-height: 1.6;
   text-align: center;
+}
+
+/* -------------------------------------------------------- 列表/地图切换 */
+
+.view-switch {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 11px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  box-shadow: var(--c-shadow);
+}
+.switch-btn {
+  flex: 1;
+  padding: 8px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--c-text-dim);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  /* 移动端点按目标高度 */
+  min-height: 38px;
+}
+.switch-btn.active {
+  background: var(--c-primary-soft);
+  color: var(--c-primary);
+  font-weight: 600;
 }
 
 .c-btn {
