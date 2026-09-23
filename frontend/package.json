@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
-    "type-check": "vue-tsc --noEmit"
+    "type-check": "vue-tsc --noEmit",
+    "verify:route": "esbuild src/utils/geo.ts --bundle --format=esm --alias:@=./src --outfile=scripts/.tmp/geo.mjs --log-level=error && esbuild src/utils/route.ts --bundle --format=esm --alias:@=./src --outfile=scripts/.tmp/route.mjs --log-level=error && node scripts/verify_route.mjs",
+    "verify:pwa": "..\\backend\\.venv\\Scripts\\python.exe scripts\\verify_pwa.py"
   },
   "dependencies": {
     "@amap/amap-jsapi-loader": "^1.0.1",
