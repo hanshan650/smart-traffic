@@ -18,6 +18,7 @@ import { useRouter } from 'vue-router'
 
 import { citizenReportApi, publicApi } from '@/api/citizen'
 import { describeError } from '@/api/client'
+import { rememberReport } from '@/utils/myReports'
 import type { CitizenReportCreateResponse, CitizenReportOptions } from '@/types/citizen'
 
 const router = useRouter()
@@ -120,6 +121,9 @@ async function submit(): Promise<void> {
       longitude: form.value.longitude,
       image: image.value,
     })
+    // 记在本机。编号只在提交成功的这一刻出现一次，
+    // 用户没拄下来（或者随手关页）就再也找不回去了
+    rememberReport(result.value.report)
   } catch (err) {
     error.value = describeError(err).message
   } finally {
