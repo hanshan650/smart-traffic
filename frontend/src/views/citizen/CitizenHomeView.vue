@@ -119,16 +119,17 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <!-- 事件级别 -->
-      <section class="stat-row">
+      <!-- 事件级别。地图模式下隐藏：这些数字已经在地图内的浮层里了，
+           同时在两处展示只会让人怀疑哪一份才是最新的 -->
+      <section v-if="viewMode === 'list'" class="stat-row">
         <div v-for="item in levelCards" :key="item.label" class="c-card stat">
           <span class="stat-value" :style="{ color: item.color }">{{ item.value }}</span>
           <span class="stat-label">{{ item.label }}</span>
         </div>
       </section>
 
-      <!-- 拥堵分布 -->
-      <section class="c-card">
+      <!-- 拥堵分布（仅列表模式） -->
+      <section v-if="viewMode === 'list'" class="c-card">
         <h3 class="c-section-title">路段通行状况</h3>
         <div class="congestion-row">
           <div v-for="item in congestionCards" :key="item.label" class="congestion-item">
@@ -157,8 +158,19 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <!-- 地图视图 -->
-      <CongestionMap v-if="viewMode === 'map'" :rank="mapRank" :events="events" />
+      <!--
+        地图视图。
+
+        通行状况与事件列表都作为**地图内的浮层**呈现（见 CongestionMap），
+        所以这里不再重复渲染外部卡片 —— 同一批数据在两处展示，
+        用户还得自己对照“地图上那个红点是列表里哪一条”。
+      -->
+      <CongestionMap
+        v-if="viewMode === 'map'"
+        :rank="mapRank"
+        :events="events"
+        :overview="overview"
+      />
 
       <!-- 拥堵排行 -->
       <section v-if="viewMode === 'list' && rank.length" class="c-card">
@@ -183,8 +195,8 @@ onBeforeUnmount(() => {
         </ul>
       </section>
 
-      <!-- 事件列表 -->
-      <section class="c-card">
+      <!-- 事件列表（仅列表模式；地图模式已在浮层内展示） -->
+      <section v-if="viewMode === 'list'" class="c-card">
         <h3 class="c-section-title">最新路况事件</h3>
 
         <div v-if="!events.length" class="empty-inline">
@@ -209,6 +221,7 @@ onBeforeUnmount(() => {
         </ul>
       </section>
 
+      <!-- 免责声明在两种视图下都保留：它是合规要求，不随展示形式变化 -->
       <p class="disclaimer">
         以上信息来自高速监测点自动采集，可能存在延迟或误差。出行请以实际路况与交管部门发布为准。
       </p>
