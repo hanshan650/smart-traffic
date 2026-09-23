@@ -25,17 +25,21 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from starlette.concurrency import run_in_threadpool
 
-from app.models.schemas import CitizenReportReviewRequest
+from app.core.security import get_current_user
+from app.models.schemas import CitizenReportArchiveRequest, CitizenReportReviewRequest
 from app.services import citizen_report_service
 from app.services.citizen_report_service import CitizenReportError
 
 router = APIRouter(prefix='/reports', tags=['民众上报复核'])
 
-#: 复核队列的状态过滤取值
-ALLOWED_STATUSES = frozenset({'pending', 'approved', 'rejected', 'duplicate'})
+#: 复核队列的状态过滤取值。
+#:
+#: **从服务层的 STATUS_LABEL 派生**，不另写一份：这里曾经是硬编码的四项，
+#: 新增 ``archived`` 时就漏了，表现为按“已归档”筛选直接返回 400。
+ALLOWED_STATUSES = frozenset(citizen_report_service.STATUS_LABEL)
 
 
 @router.get('/stats', summary='上报概览')
@@ -50,14 +54,14 @@ def report_stats() -> Dict[str, Any]:
 
 @router.get('', summary='复核队列')
 def list_reports(
-    status: str = Query('pending', description='pending / approved / rejected / duplicate'),
+    status: str = Query('pending', description=' / '.join(sorted(citizen_report_service.STATUS_LABEL))),
     limit: int = Query(50, ge=1, le=200),
     skip: int = Query(0, ge=0),
 ) -> Dict[str, Any]:
     """列出民众上报。
 
     默认只列待复核的 —— 值班员打开这个页面的目的就是处理积压，
-    把已处理的混进来只会稀释注意力。
+    把已处理的混进来只会稀释注意力。要看归档的单独筛 ``archived``。
     """
     if status and status not in ALLOWED_STATUSES:
         raise HTTPException(
@@ -107,6 +111,43 @@ async def review_report(
             reviewer=payload.reviewer,
             note=payload.note,
             level=payload.level,
+        )
+    except CitizenReportError as exc:
+        raise HTTPException(status_code=400, detail={'success': False, 'error': str(exc)})
+
+    if report is None:
+        raise HTTPException(
+            status_code=404,
+            detail={'success': False, 'error': f'未找到编号为 {report_no} 的上报'},
+        )
+    return {'success': True, **report.internal_dict()}
+
+
+@router.post('/{report_no}/archive', summary='归档上报')
+async def archive_report(
+    request: Request,
+    report_no: str,
+    payload: CitizenReportArchiveRequest,
+) -> Dict[str, Any]:
+    """归档一条上报（软删除）。
+
+    为什么不真删：已通过的上报关联着正式事件（``event_id``）、照片是磁盘上
+    的真实文件、而且它参与频率限制的计数。详见
+    `citizen_report_service.archive_report`。
+
+    已复核的上报也能归档 —— 归档是管理动作，与复核互不覆盖，
+    原来的 ``reviewed_by`` / ``event_id`` 都保留。
+    """
+    try:
+        report = await run_in_threadpool(
+            citizen_report_service.archive_report,
+            report_no,
+            # 操作人取**会话里的警号**，不用请求体里的。若由前端决定，
+            # 值班员填上别人的警号就能把归档记到别人头上 —— 留痕也就没意义了。
+            # 请求体的 operator 只在没有会话的场景下兜底（接口本身要求登录，
+            # 实际走不到那一步）。
+            operator=get_current_user(request).officer_id or payload.operator,
+            reason=payload.reason,
         )
     except CitizenReportError as exc:
         raise HTTPException(status_code=400, detail={'success': False, 'error': str(exc)})

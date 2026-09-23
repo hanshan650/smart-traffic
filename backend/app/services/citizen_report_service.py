@@ -101,7 +101,11 @@ STATUS_LABEL: Dict[str, str] = {
     'approved': '已核实，已转入正式处置流程',
     'rejected': '经核实未采纳',
     'duplicate': '与已有上报重复',
+    'archived': '该上报已归档，不再进入处置流程',
 }
+
+#: 归档状态。软删除，见 `archive_report`
+ARCHIVED_STATUS = 'archived'
 
 
 class CitizenReportError(ValueError):
@@ -119,6 +123,9 @@ def _window_start() -> datetime:
 
 def check_rate_limit(client_key: str) -> tuple[bool, str]:
     """检查是否超出上报频率上限。
+
+    计数**不过滤状态**，这是刻意的：已驳回、已归档的上报同样占额度。
+    否则“报满上限 → 让值班员归档 → 继续报”就是一条现成的绕行路径。
 
     :return: ``(是否允许, 拒绝原因)``
     """
@@ -236,11 +243,20 @@ class CitizenReport:
     reviewed_at: Optional[datetime] = None
     #: 复核通过后生成的正式事件 id
     event_id: str = ''
+    #: 归档（软删除）留痕。为什么不做物理删除，见 `archive_report`
+    archived_by: str = ''
+    archived_at: Optional[datetime] = None
+    archive_reason: str = ''
     created_at: datetime = field(default_factory=datetime.utcnow)
     id: str = ''
 
     def public_dict(self) -> Dict[str, Any]:
-        """面向民众的视图：脱敏、降精度、不含联系方式。"""
+        """面向民众的视图：脱敏、降精度、不含联系方式。
+
+        归档字段**不出现在这里**。民众拿编号查进度，看到的是状态标签
+        （“已归档，不再进入处置流程”）—— 那是他需要知道的；而归档理由
+        是内部管理说明（可能写的是“广告”“重复提交”），不属于要返回的内容。
+        """
         return {
             'reportNo': self.report_no,
             'reportType': self.report_type,
@@ -268,6 +284,9 @@ class CitizenReport:
             'level': self.level,
             'reviewedBy': self.reviewed_by,
             'eventId': self.event_id,
+            'archivedBy': self.archived_by,
+            'archivedAt': self.archived_at.isoformat() if self.archived_at else None,
+            'archiveReason': self.archive_reason,
         })
         return data
 
@@ -290,6 +309,9 @@ def _to_report(document: Dict[str, Any]) -> CitizenReport:
         reviewed_by=document.get('reviewed_by', ''),
         reviewed_at=document.get('reviewed_at'),
         event_id=document.get('event_id', ''),
+        archived_by=document.get('archived_by', ''),
+        archived_at=document.get('archived_at'),
+        archive_reason=document.get('archive_reason', ''),
         created_at=document.get('created_at') or datetime.utcnow(),
     )
 
@@ -395,11 +417,18 @@ def list_reports(
     status: str = '',
     limit: int = 50,
     skip: int = 0,
+    include_archived: bool = False,
 ) -> List[CitizenReport]:
-    """列出上报（警务端复核队列用）。"""
+    """列出上报（警务端复核队列用）。
+
+    ``status`` 为空时**默认排除已归档**。归档的含义就是“从日常视野里拿掉”，
+    仍然混在列表里等于没归档。要看它们就显式筛 ``status='archived'``。
+    """
     query: Dict[str, Any] = {}
     if status:
         query['status'] = status
+    elif not include_archived:
+        query['status'] = {'$ne': ARCHIVED_STATUS}
     try:
         cursor = (
             mongo.get_db()[REPORT_COLLECTION]
@@ -413,10 +442,14 @@ def list_reports(
         return []
 
 
-def count_reports(status: str = '') -> int:
+def count_reports(status: str = '', include_archived: bool = False) -> int:
+    """计数。口径必须与 `list_reports` 一致，否则前端会看到
+    “列表只有 3 条、总数却写 40”这类对不上的数字。"""
     query: Dict[str, Any] = {}
     if status:
         query['status'] = status
+    elif not include_archived:
+        query['status'] = {'$ne': ARCHIVED_STATUS}
     try:
         return mongo.get_db()[REPORT_COLLECTION].count_documents(query)
     except PyMongoError:
@@ -553,6 +586,63 @@ def review_report(
         )
     except PyMongoError as exc:
         raise CitizenReportError(f'复核写入失败：{exc}') from exc
+
+    return get_report(report_no)
+
+
+def archive_report(
+    report_no: str,
+    *,
+    operator: str,
+    reason: str = '',
+) -> Optional[CitizenReport]:
+    """归档一条上报（软删除）。
+
+    **刻意不做物理删除**，四个理由都来自真实的关联：
+
+    1. 复核通过的上报会生成正式事件，``event_id`` 存在上报记录里。删掉记录，
+       事件就失去了来源 —— 以后问“这条事件哪来的”无处可查。而且事件的
+       ``snapshot_url`` 直接指向上报那张照片。
+    2. 照片是 ``static/uploads/`` 下的真实文件，数据库里只有 URL。删记录不删
+       文件是磁盘泄漏，删文件不删记录是前端裂图，而同一张图可能已被事件引用 ——
+       三件事必须一起做，风险与收益不成比例。
+    3. 频率限制（`check_rate_limit`）按 ``client_key + created_at`` 统计窗口内
+       条数。删记录等于抵消额度，“删了就能再报”是一条现成的绕行路径。
+       归档**照常计入**，所以这里不碰限流逻辑。
+    4. 上报含坐标、联系方式、照片。被静默删掉后没有任何痕迹说明“这里曾经
+       有过一条上报”。归档把 ``archived_by / archived_at / archive_reason``
+       一起留下，是可追溯的。
+
+    归档是**终态**，不提供撤销：一次管理决定应当可追溯，做双向流转只会让状态
+    机复杂化。确实需要恢复的，由管理员直接改库。
+
+    已复核的上报归档后，``reviewed_by`` / ``event_id`` 都原样保留。
+
+    :raises CitizenReportError: 未填操作人 / 已归档 / 写入失败
+    """
+    if not (operator or '').strip():
+        raise CitizenReportError('操作人不能为空：归档必须留痕')
+
+    report = get_report(report_no)
+    if report is None:
+        return None
+
+    if report.status == ARCHIVED_STATUS:
+        raise CitizenReportError('该上报已归档，不可重复操作')
+
+    changes: Dict[str, Any] = {
+        'status': ARCHIVED_STATUS,
+        'archived_by': operator.strip(),
+        'archived_at': datetime.utcnow(),
+        'archive_reason': reason.strip(),
+    }
+
+    try:
+        mongo.get_db()[REPORT_COLLECTION].update_one(
+            {'report_no': report_no.strip()}, {'$set': changes}
+        )
+    except PyMongoError as exc:
+        raise CitizenReportError(f'归档写入失败：{exc}') from exc
 
     return get_report(report_no)
 

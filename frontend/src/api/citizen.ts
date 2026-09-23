@@ -148,4 +148,17 @@ export const reviewApi = {
     http
       .post<InternalCitizenReport>(`/reports/${reportNo}/review`, payload, { timeout: 60000 })
       .then((r) => r.data),
+
+  /**
+   * 归档（软删除）。记录仍保留，只是不再出现在日常列表里。
+   *
+   * 接口是 `/archive` 而不是 `DELETE` —— 后端不做物理删除，
+   * 用 DELETE 会让人以为数据没了。
+   *
+   * 不传 operator：留痕取会话里的警号，客户端说了不算。
+   */
+  archive: (reportNo: string, payload: { reason?: string } = {}) =>
+    http
+      .post<InternalCitizenReport>(`/reports/${reportNo}/archive`, payload)
+      .then((r) => r.data),
 }

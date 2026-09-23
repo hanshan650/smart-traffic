@@ -23,14 +23,18 @@ import { computed, onMounted, ref } from 'vue'
 
 import { reviewApi } from '@/api/citizen'
 import { describeError } from '@/api/client'
+import { useAuthStore } from '@/stores/auth'
 import { relativeTime } from '@/utils/time'
 import type { InternalCitizenReport } from '@/types/citizen'
+
+const auth = useAuthStore()
 
 const STATUS_OPTIONS = [
   { key: 'pending', label: '待复核' },
   { key: 'approved', label: '已通过' },
   { key: 'rejected', label: '已驳回' },
   { key: 'duplicate', label: '重复' },
+  { key: 'archived', label: '已归档' },
 ]
 
 const reports = ref<InternalCitizenReport[]>([])
@@ -46,14 +50,24 @@ const tone = ref<'ok' | 'warn' | 'danger'>('ok')
 const reviewer = ref('')
 const note = ref('')
 const level = ref('')
+// 归档表单。理由**不放进 note** —— note 是复核意见、会展示给上报人，
+// 而归档理由是内部管理说明（可能写着“广告”“重复提交”）
+const archiveReason = ref('')
 
 const REVIEWER_KEY = 'police.reviewer'
+
+/** 状态 → 短标签。从 STATUS_OPTIONS 派生，两处不会漂移 */
+const STATUS_SHORT: Record<string, string> = Object.fromEntries(
+  STATUS_OPTIONS.map((item) => [item.key, item.label]),
+)
 
 const summaryCards = computed(() => [
   { label: '上报总数', value: stats.value?.total ?? 0, color: 'var(--accent)' },
   { label: '待复核', value: stats.value?.pending ?? 0, color: '#facc15' },
   { label: '已通过', value: stats.value?.byStatus?.approved ?? 0, color: '#10b981' },
   { label: '已驳回', value: stats.value?.byStatus?.rejected ?? 0, color: '#64748b' },
+  // 总数包含归档，不给它一张卡片的话四张卡加起来对不上总数，看着像少了数据
+  { label: '已归档', value: stats.value?.byStatus?.archived ?? 0, color: '#78716c' },
 ])
 
 function notify(text: string, next: 'ok' | 'warn' | 'danger' = 'ok'): void {
@@ -83,6 +97,7 @@ async function load(): Promise<void> {
 function select(item: InternalCitizenReport): void {
   current.value = item
   note.value = ''
+  archiveReason.value = ''
   level.value = item.level || ''
 }
 
@@ -126,6 +141,44 @@ onMounted(async () => {
   reviewer.value = window.localStorage.getItem(REVIEWER_KEY) ?? ''
   await load()
 })
+
+/**
+ * 归档（软删除）。
+ *
+ * 归档是**不可撤销**的，所以用 confirm 拦一道。它不会真的删数据 ——
+ * 记录、照片、关联事件都原样保留，只是不再出现在日常列表里。
+ * 确认文案里刻意说清楚这一点，否则值班员会以为照片也没了。
+ *
+ * **不要求手填操作人**：后端以会话里的警号为准。让前端传等于允许填别人的
+ * 警号，留痕就失去意义了。
+ */
+async function archive(): Promise<void> {
+  if (!current.value) return
+
+  const linked = current.value.eventId
+    ? `\n该上报已生成事件 ${current.value.eventId.slice(-8)}，归档不会删除那条事件。`
+    : ''
+  const ok = window.confirm(
+    `确认归档上报 ${current.value.reportNo}？\n` +
+      `归档后不再出现在日常列表里，记录与照片均保留（可在「已归档」中查看）。${linked}`,
+  )
+  if (!ok) return
+
+  busy.value = true
+  try {
+    await reviewApi.archive(current.value.reportNo, {
+      reason: archiveReason.value.trim(),
+    })
+    notify('已归档，记录仍保留（可在「已归档」筛选中查看）', 'ok')
+    current.value = null
+    archiveReason.value = ''
+    await load()
+  } catch (error) {
+    notify(describeError(error).message, 'danger')
+  } finally {
+    busy.value = false
+  }
+}
 
 function rememberReviewer(): void {
   if (reviewer.value.trim()) {
@@ -214,9 +267,15 @@ function rememberReviewer(): void {
             <span>◈ {{ current.reportNo }}</span>
             <span
               class="badge"
-              :class="current.status === 'pending' ? 'tag-warn' : 'tag-ok'"
+              :class="
+                current.status === 'pending'
+                  ? 'tag-warn'
+                  : current.status === 'approved'
+                    ? 'tag-ok'
+                    : 'tag-mute'
+              "
             >
-              {{ current.status === 'pending' ? '待复核' : current.status }}
+              {{ STATUS_SHORT[current.status] || current.status }}
             </span>
           </div>
 
@@ -299,6 +358,53 @@ function rememberReviewer(): void {
               </div>
             </div>
             <p v-if="current.reviewNote" class="desc-text">{{ current.reviewNote }}</p>
+          </template>
+
+          <!--
+            归档。**刻意与「复核」分开一块** —— 混在复核按钮里会让人以为它也是
+            一次复核，而它其实是管理动作（拿掉垃圾/无效上报）。
+            也刻意不做成红色大按钮：归档不删数据，夸张的样式会把它误导成危险操作。
+          -->
+          <template v-if="current.status !== 'archived'">
+            <div class="block-head">
+              <span>归档</span>
+              <span class="text-faint small">
+                记录保留、照片保留，只是不再出现在日常列表里
+              </span>
+            </div>
+
+            <p v-if="current.eventId" class="archive-note">
+              该上报已生成事件 {{ current.eventId.slice(-8) }}，归档不会删除那条事件。
+            </p>
+
+            <p class="text-faint small archive-operator">
+              操作人自动记为当前登录警号：{{ auth.user?.officerId || '（未登录）' }}
+            </p>
+
+            <label class="field">
+              <span>归档理由（选填，仅警务端可见）</span>
+              <input
+                v-model="archiveReason"
+                class="input"
+                placeholder="例如：广告 / 重复提交 / 内容无效"
+              />
+            </label>
+
+            <div class="row-actions">
+              <button class="btn btn-sm btn-danger" :disabled="busy" @click="archive">
+                归档此上报
+              </button>
+            </div>
+          </template>
+
+          <template v-else>
+            <div class="block-head"><span>归档信息</span></div>
+            <div class="kv">
+              <div><span>归档人</span><b class="mono">{{ current.archivedBy || '—' }}</b></div>
+              <div><span>归档时间</span><b>{{ relativeTime(current.archivedAt) }}</b></div>
+            </div>
+            <p v-if="current.archiveReason" class="desc-text">{{ current.archiveReason }}</p>
+            <p v-else class="text-faint small">未填写归档理由</p>
           </template>
         </template>
       </section>
@@ -524,6 +630,30 @@ function rememberReviewer(): void {
 }
 .tag-ok {
   color: var(--ok);
+}
+/* 已归档/已驳回：中性灰。它们既不是"成功"也不是"失败"，
+   只是从在办队列里拿走了 */
+.tag-mute {
+  color: var(--text-faint);
+}
+
+/* 归档前提示"关联事件仍在"。用琥珀色而不是红色：这条提示是解释性的，
+   不是在报警 */
+.archive-note {
+  margin: 0 0 10px;
+  padding: 7px 10px;
+  border-left: 2px solid var(--warn);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: rgba(217, 119, 6, 0.1);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--warn);
+}
+
+/* 说明操作人取登录身份。比"默默记下"好 —— 值班员共用机器，
+   让他确认一下当前是谁登录着 */
+.archive-operator {
+  margin: 0 0 10px;
 }
 
 .empty {

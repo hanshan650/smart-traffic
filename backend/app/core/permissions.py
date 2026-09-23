@@ -96,6 +96,10 @@ WRITE_RULES: List[Tuple[str, frozenset]] = [
     # 事件复核、民众上报复核、警情处置：值班员的本职
     (r'^/api/v1/events/.*/review', frozenset({Role.ADMIN.value, Role.DISPATCHER.value})),
     (r'^/api/v1/reports/.*/review', frozenset({Role.ADMIN.value, Role.DISPATCHER.value})),
+    # 民众上报归档。**必须单独登记**：上面的 review 规则是
+    # `.*/review`，匹配不到 `/archive`，漏了这条会落到"未登记 → 仅 admin"，
+    # 值班员在界面上点归档就是 403
+    (r'^/api/v1/reports/.*/archive', frozenset({Role.ADMIN.value, Role.DISPATCHER.value})),
     (r'^/api/v1/incidents', frozenset({Role.ADMIN.value, Role.DISPATCHER.value})),
     # 违停告警处置与巡检开关
     (r'^/api/v1/surveillance', frozenset({Role.ADMIN.value, Role.DISPATCHER.value})),
