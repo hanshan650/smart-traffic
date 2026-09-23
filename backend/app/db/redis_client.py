@@ -224,6 +224,65 @@ def ztop(key: str, limit: int = 10) -> List[Dict[str, Any]]:
     return [{'member': member, 'score': score} for member, score in rows]
 
 
+def scan_json_values(
+    prefix: str,
+    limit: int = 200,
+    max_iterations: int = 20,
+) -> List[Dict[str, Any]]:
+    """扫描匹配前缀的 JSON 值（**优先用索引，不要依赖本函数**）。
+
+    为什么默认不用它：``SCAN`` 必须**完整遍历整个 key 空间**才能确认
+    "确实找完了"，返回游标 0 才代表结束。key 较多时往返次数会急剧上升，
+    实测可把一次请求拖到 30 秒以上。因此这里额外加了 ``max_iterations``
+    上限 —— 宁可返回不完整的结果，也不要挂住请求线程。
+
+    需要"列出所有某某"时应当维护显式索引（见 :func:`smembers` 与
+    ``snapshot_index`` 的用法），那是一次往返且结果确定。
+
+    无 Redis 或读取失败时返回空列表，由调用方优雅降级。
+    """
+    if not _tcp_reachable():
+        return []
+    try:
+        client = get_redis()
+        pattern = make_key(prefix) + '*'
+        values: List[Dict[str, Any]] = []
+        cursor = 0
+        for _ in range(max_iterations):
+            cursor, batch = client.scan(cursor=cursor, match=pattern, count=100)
+            for raw_key in batch:
+                payload = get_json(raw_key)
+                if isinstance(payload, dict):
+                    values.append(payload)
+                if len(values) >= limit:
+                    return values
+            if cursor == 0:
+                break
+        return values
+    except (RedisError, OSError):
+        return []
+
+
+def sadd_members(key: str, members: List[str]) -> None:
+    """把一个集合写入索引。用于维护"当前有哪些对象"这类名单。"""
+    if not members:
+        return
+    try:
+        get_redis().sadd(make_key(key), *[str(item) for item in members])
+    except (RedisError, OSError):
+        pass
+
+
+def smembers(key: str) -> List[str]:
+    """读取索引集合。无 Redis 时返回空列表。"""
+    if not _tcp_reachable():
+        return []
+    try:
+        return [str(item) for item in get_redis().smembers(make_key(key))]
+    except (RedisError, OSError):
+        return []
+
+
 def info() -> Dict[str, Any]:
     """Redis 运行信息摘要，供健康检查展示。"""
     try:

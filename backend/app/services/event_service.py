@@ -172,6 +172,11 @@ def cache_snapshot(
             total_vehicles * _SEVERITY_WEIGHT.get(congestion_level, 1.0),
         )
 
+    # 维护快照名单。读取方需要"列出所有当前路况"时，读这个索引是一次
+    # 往返；若改为扫描 ``snapshot:*`` 前缀，SCAN 必须遍历完整个 key 空间
+    # 才能确认结束，key 多时会把请求拖到超时。
+    redis_client.sadd_members('snapshot_index', [camera_id])
+
 
 def get_snapshot(camera_id: str) -> Optional[Dict[str, Any]]:
     return redis_client.get_json(redis_client.make_key('snapshot', camera_id))

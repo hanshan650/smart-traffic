@@ -36,6 +36,7 @@ const navItems = [
   { name: 'accident', path: '/accident', label: '事故识别', icon: '⚡' },
   { name: 'dispatch', path: '/dispatch', label: '警情调度', icon: '⚑' },
   { name: 'surveillance', path: '/surveillance', label: '违停监控', icon: '⊙' },
+  { name: 'reports', path: '/reports', label: '民众上报', icon: '✉' },
   { name: 'officers', path: '/officers', label: '警员管理', icon: '☰' },
   { name: 'events', path: '/events', label: '告警中心', icon: '⚠' },
   { name: 'roads', path: '/roads', label: '上海路网', icon: '⇄' },
