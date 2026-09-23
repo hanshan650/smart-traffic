@@ -192,7 +192,8 @@ onMounted(() => {
   border-radius: 10px;
   background: var(--c-surface);
   color: var(--c-text);
-  font-size: 15px;
+  /* ≥ 16px，避免 iOS 聚焦时自动放大页面 */
+  font-size: 16px;
   font-family: var(--font-mono, ui-monospace, monospace);
   letter-spacing: 1px;
   box-sizing: border-box;

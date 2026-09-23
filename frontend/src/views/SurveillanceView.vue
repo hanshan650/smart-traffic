@@ -902,6 +902,7 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 .alert-card {
+  position: relative;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-panel-2);
@@ -918,6 +919,31 @@ onBeforeUnmount(() => {
 }
 .alert-head:hover {
   background: var(--bg-hover);
+}
+
+/*
+  窄屏：七列固定网格的最小宽度合计约 710px，在手机上必然横向溢出。
+  改成换行流，次要项自然折叠到下一行；展开箭头改成绝对定位贴右上角，
+  否则它会独占一行且把卡片撑高。
+*/
+@media (max-width: 900px) {
+  .alert-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+    padding-right: 30px;
+  }
+  .alert-head .chev {
+    position: absolute;
+    top: 9px;
+    right: 10px;
+    margin: 0;
+  }
+  /* 长度不确定的文本项允许压缩，避免长点位名把行顶宽 */
+  .alert-head > * {
+    min-width: 0;
+  }
 }
 .alert-still {
   color: var(--warn);

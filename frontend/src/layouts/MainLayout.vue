@@ -14,6 +14,7 @@ import { useEventStore } from '@/stores/event'
 import { useSystemStore } from '@/stores/system'
 import { useVideoStore } from '@/stores/video'
 import { useWebSocket } from '@/composables/useWebSocket'
+import PwaPrompt from '@/components/PwaPrompt.vue'
 import {
   CONGESTION_COLOR,
   CONGESTION_LABEL,
@@ -45,9 +46,9 @@ const navItems = [
 
 const healthBadge = computed(() => {
   const health = systemStore.health
-  if (!health) return { text: '未连接', cls: 'badge-muted' }
-  if (health.status === 'ok') return { text: '服务正常', cls: 'badge-ok' }
-  return { text: '部分降级', cls: 'badge-warn' }
+  if (!health) return { text: '未连接', short: '未连', cls: 'badge-muted' }
+  if (health.status === 'ok') return { text: '服务正常', short: '正常', cls: 'badge-ok' }
+  return { text: '部分降级', short: '降级', cls: 'badge-warn' }
 })
 
 const pendingCount = computed(() => eventStore.pendingEvents.length)
@@ -107,11 +108,30 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (refreshTimer !== null) clearInterval(refreshTimer)
 })
+
+/**
+ * 移动端抽屉开合状态。
+ *
+ * 窄屏下侧栏改为抽屉：固定 251px 的侧栏在手机上会把内容挤到没法看，
+ * 而警务端 12 个导航项又不可能压成底部 Tab（那样每项只剩 30px 宽）。
+ *
+ * 点击导航项后**必须自动关闭** —— 否则用户点完菜单还得再手动关一次，
+ * 而且新页面被抽屉盖着看不见。
+ */
+const drawerOpen = ref(false)
+
+watch(
+  () => route.fullPath,
+  () => { drawerOpen.value = false },
+)
 </script>
 
 <template>
-  <div class="layout">
-    <!-- 侧边导航 -->
+  <div class="layout" :class="{ 'drawer-open': drawerOpen }">
+    <!-- 抽屉遮罩（仅移动端出现） -->
+    <div v-if="drawerOpen" class="drawer-mask" @click="drawerOpen = false" />
+
+    <!-- 侧边导航（窄屏下变为抽屉） -->
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-mark">ST</div>
@@ -119,6 +139,8 @@ onBeforeUnmount(() => {
           <strong>智能交通监测</strong>
           <small>与事故预警平台</small>
         </div>
+        <!-- 抽屉里的关闭按钮，只在移动端显示 -->
+        <button class="drawer-close" title="关闭菜单" @click="drawerOpen = false">✕</button>
       </div>
 
       <nav class="nav">
@@ -154,16 +176,35 @@ onBeforeUnmount(() => {
     <!-- 主区域 -->
     <div class="main">
       <header class="topbar">
+        <!-- 汉堡按钮，仅移动端显示 -->
+        <button class="hamburger" title="打开菜单" @click="drawerOpen = true">
+          <span />
+          <span />
+          <span />
+        </button>
+
         <h1 class="page-title">{{ route.meta.title ?? '' }}</h1>
 
         <div class="topbar-right">
+          <!--
+            窄屏下状态文字收起，只留圆点；但**断线时必须保留文字** ——
+            红点本身不说明问题，值班员需要一眼看出"连不上了"。
+          -->
           <span class="badge" :class="connected ? 'badge-ok' : 'badge-danger'">
             <span :class="{ pulse: !connected }">●</span>
-            {{ connected ? '实时连接' : '连接断开' }}
+            <span v-if="connected" class="badge-label">实时连接</span>
+            <span v-else>连接断开</span>
           </span>
-          <span class="badge" :class="healthBadge.cls">{{ healthBadge.text }}</span>
+
+          <!-- 健康状态：窄屏换成短词（降级 / 正常），而不是整个隐掉 -->
+          <span class="badge" :class="healthBadge.cls">
+            <span class="badge-label">{{ healthBadge.text }}</span>
+            <span class="badge-short">{{ healthBadge.short }}</span>
+          </span>
+
           <span class="badge badge-info">
-            待复核 {{ pendingCount }}
+            <span class="badge-label">待复核</span>
+            {{ pendingCount }}
           </span>
         </div>
       </header>
@@ -172,6 +213,9 @@ onBeforeUnmount(() => {
         <RouterView />
       </main>
     </div>
+
+    <!-- 新版本与离线提示（警务端不显示安装引导） -->
+    <PwaPrompt />
 
     <!-- 全局告警弹窗（AI 建议 + 一键确认） -->
     <Transition name="slide-up">
@@ -243,6 +287,49 @@ onBeforeUnmount(() => {
   display: flex;
   height: 100%;
 }
+
+/*
+  移动端适配
+  ===========
+  警员在路面执勤时用手机接警、处置，所以警务端也得能在窄屏上用。
+  策略：侧栏（固定 210px）改为抽屉，汉堡按钮唤出。
+
+  断点取 900px 而不是 768px：侧栏 210px + 内容区最小可用宽度（表格、
+  分栏）大约需要 690px，加起来接近 900px。只看惯用的 768px 会在
+  768–900px 这段把内容挤得比手机还难用（平板竖屏正好落在这里）。
+*/
+.hamburger {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  width: 40px;
+  height: 40px;
+  margin-right: 10px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+}
+.hamburger span {
+  display: block;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--text-dim);
+}
+.hamburger:active {
+  background: var(--bg-panel-2);
+}
+
+.drawer-mask {
+  display: none;
+}
+
+.drawer-close {
+  display: none;
+}
+
 
 /* ---------------- 侧边栏 ---------------- */
 .sidebar {
@@ -381,6 +468,10 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
 }
+/* 宽屏用完整文字，窄屏（见文末媒体查询）换成 .badge-short 的短词 */
+.topbar-right .badge-short {
+  display: none;
+}
 
 .content {
   flex: 1;
@@ -494,4 +585,129 @@ kbd {
 .fade-leave-to {
   opacity: 0;
 }
+/*
+  移动端适配（必须放在样式表最后）
+  ==================================
+  这几条规则覆盖 .sidebar / .topbar / .content 的桌面值，而 CSS 对同特异性
+  声明只看出现顺序 —— 所以这一块一旦被放到那些规则前面，就会静默失效：
+  抽屉宽度回到 210px、顶栏内边距回到桌面值，编译器与浏览器都不报错。
+*/
+@media (max-width: 900px) {
+  .hamburger {
+    display: flex;
+  }
+
+  /* 侧栏脱离流，避免占位（否则内容区会被挤出屏幕右侧） */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 1500;
+    width: 258px;
+    max-width: 82vw;
+    transform: translateX(-100%);
+    transition: transform 0.24s ease;
+    box-shadow: 6px 0 28px rgba(0, 0, 0, 0.45);
+    overflow-y: auto;
+  }
+  .drawer-open .sidebar {
+    transform: translateX(0);
+  }
+
+  .drawer-mask {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 1400;
+    background: rgba(2, 6, 12, 0.6);
+  }
+
+  .drawer-close {
+    display: block;
+    margin-left: auto;
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--text-dim);
+    font-size: 14px;
+    cursor: pointer;
+  }
+
+  /* 顶栏：标题占满剩余宽度，状态徽章只留圆点与数字，避免换行 */
+  .topbar {
+    height: auto;
+    min-height: 52px;
+    gap: 8px;
+    padding: 8px 12px;
+    /* 横屏时避开刘海 */
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+  .page-title {
+    flex: 1;
+    min-width: 0;
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .topbar-right {
+    gap: 6px;
+  }
+  .topbar-right .badge {
+    padding: 3px 7px;
+    font-size: 11px;
+  }
+  /* 描述性文字收起，改用短词；数字直接可见，不受影响 */
+  .topbar-right .badge-label {
+    display: none;
+  }
+  .topbar-right .badge-short {
+    display: inline;
+  }
+
+  .content {
+    padding: 12px;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+
+  /*
+    警务端各页面的表单控件统一提到 16px。
+    这一条写在布局里而不是逐个改页面：iOS Safari 在字号 < 16px 的输入框
+    获得焦点时会自动放大页面，而各页面自己的 .input 大多是 13–14px。
+    逐个页面改既容易漏，又会让同一控件在两端表现不一致。
+
+    排除 checkbox / radio：它们没有文字，放大字号只会撑变形。
+  */
+  .content :deep(input:not([type='checkbox']):not([type='radio'])),
+  .content :deep(textarea),
+  .content :deep(select) {
+    font-size: 16px;
+  }
+
+  /*
+    触控目标下限。手指点击精度约 44px，13px 字号的小按钮
+    （各页面里的 .btn-sm）在手机上容易点不中，尤其执勤时单手操作。
+  */
+  .content :deep(.btn) {
+    min-height: 36px;
+  }
+
+  /*
+    宽表格的横向滚动。
+    这些表格（警员档案 10 列等）在手机上必然超出屏幕，只能横向滑动。
+
+    刻意**不加**边缘渐隐之类的"可滚动"提示：要正确实现得靠 4 层背景
+    配合 background-attachment 判断是否滚到端点，做不完整就会在无法滚动时
+    也显示渐变，反而误导。移动端用户对横向滑表格本来就熟悉，不值得为此引入
+    一个半对的视觉效果。
+  */
+  .content :deep(.table-wrap) {
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
 </style>
