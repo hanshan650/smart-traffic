@@ -26,9 +26,10 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.v1 import api_router
 from app.core.config import settings
+from app.core.security import AuthMiddleware
 from app.db import mongo, redis_client
 from app.realtime.ws_manager import bind_loop
-from app.services import detector, video_source
+from app.services import auth_service, detector, officer_service, video_source
 
 # 静态目录需在挂载前存在，故在模块导入阶段创建
 _STATIC_DIR = settings.upload_path.parent
@@ -81,6 +82,28 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
     print(f'[INFO]  上传目录：{settings.upload_path}')
     print(f'[INFO]  上海路网接口已就绪（与视频源解耦）')
+
+    # ---------------- 认证 ----------------
+    # 启动时把"能登录的账号有几个"直接打出来。
+    # 不这么做的话，seeded 之前所有警务端接口都返回 401，
+    # 而看日志的人很难想到是"还没有账号"
+    auth_service.ensure_indexes()
+    try:
+        usable = officer_service.count_with_credentials()
+        total = len(officer_service.list_officers(limit=500).items)
+    except Exception:
+        usable, total = -1, -1
+
+    if usable > 0:
+        print(f'[OK]    认证已启用：{usable}/{total} 个警员可登录（会话有效期 {settings.auth_session_hours} 小时）')
+    elif usable == 0:
+        print('[WARN]  认证已启用，但**没有任何警员设置了口令** —— 将无法登录')
+        print('        请执行：python scripts/seed_credentials.py')
+    else:
+        print('[WARN]  无法确认可登录账号数（数据库异常？）')
+    if settings.auth_cookie_secure is False:
+        print('[INFO]  Cookie 未要求 HTTPS。本地调试正常，生产环境应设 AUTH_COOKIE_SECURE=true')
+
     print(line + '\n')
 
     yield
@@ -101,6 +124,11 @@ app = FastAPI(
     ),
     lifespan=lifespan,
 )
+
+# 注意中间件的添加顺序：`add_middleware` 是压栈，**后加的在外层、先执行**。
+# 所以认证要加在 CORS 后面（即代码里写在 CORS 之前），让预检请求
+# 先被 CORS 处理掉。写反了会表现为"所有跨域请求都报 CORS 失败"。
+app.add_middleware(AuthMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

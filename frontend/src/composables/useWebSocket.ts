@@ -115,9 +115,14 @@ export function connect(): void {
     dispatch(message.channel, message.payload, message)
   }
 
-  socket.onclose = () => {
+  socket.onclose = (event: CloseEvent) => {
     connected.value = false
     stopHeartbeat()
+
+    // 1008：服务端主动拒绝（未登录，或当前角色不需要实时推送）。
+    // 这不是网络故障，重连只会白撞 —— 停在这里，等下次登录重建连接。
+    if (event.code === 1008) return
+
     scheduleReconnect()
   }
 

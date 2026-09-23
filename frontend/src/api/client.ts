@@ -12,10 +12,24 @@ import axios, { AxiosError } from 'axios'
 
 const BASE_URL = import.meta.env.VITE_API_BASE || '/api/v1'
 
+/**
+ * 登录接口自身的 401 不能触发“跳登录页”：
+ * 用户输错口令时表单会直接刷新掉，看起来像页面失控。
+ */
+const AUTH_ENDPOINTS = ['/auth/login', '/auth/me']
+
+function isAuthEndpoint(url?: string): boolean {
+  if (!url) return false
+  return AUTH_ENDPOINTS.some((item) => url.includes(item))
+}
+
 export const http = axios.create({
   baseURL: BASE_URL,
   timeout: 20000,
   headers: { 'Content-Type': 'application/json' },
+  // 会话走 HttpOnly Cookie。经 Vite 代理时属同源，浏览器本就会带上；
+  // 显式声明是为了将来直连后端（跨域）时不用再回来改
+  withCredentials: true,
 })
 
 export interface ApiErrorBody {
@@ -38,9 +52,23 @@ export class ApiError extends Error {
 
 http.interceptors.response.use(
   (response) => response,
-  (error: AxiosError<ApiErrorBody>) => {
+  async (error: AxiosError<ApiErrorBody>) => {
     const status = error.response?.status ?? 0
     const body = error.response?.data
+
+    // 会话失效：统一跳登录页，并把当前路径带过去，登录后能回到原地。
+    // 用动态 import 引 router —— 静态引会形成 client → router → views → client 的环
+    if (status === 401 && !isAuthEndpoint(error.config?.url)) {
+      try {
+        const { default: router } = await import('@/router')
+        const current = router.currentRoute.value
+        if (current.path !== '/login') {
+          void router.replace({ path: '/login', query: { redirect: current.fullPath } })
+        }
+      } catch {
+        // 路由还没就绪（极早期请求）。不处理，交给页面自己的空状态
+      }
+    }
 
     // FastAPI 把 HTTPException 的 detail 放在 detail 字段
     const detail = (body as unknown as { detail?: ApiErrorBody } | undefined)?.detail

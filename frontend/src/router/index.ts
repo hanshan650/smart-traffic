@@ -1,13 +1,24 @@
 /**
  * 路由表
  * ======
+ * · ``/login`` 登录页（独立布局，无导航壳）
  * · ``/screen`` 为独立的全屏指挥大屏，不使用 MainLayout
- * · 其余页面统一挂在 MainLayout 下
+ * · ``/citizen`` 民众端，**不需要登录**
+ * · 其余页面统一挂在 MainLayout 下，**均需登录**
  */
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 
+import { canSee, landingPathFor, navItemForPath } from '@/config/nav'
+import { useAuthStore } from '@/stores/auth'
+
 const routes: RouteRecordRaw[] = [
+  {
+    path: '/login',
+    name: 'login',
+    component: () => import('@/views/LoginView.vue'),
+    meta: { title: '登录' },
+  },
   {
     path: '/screen',
     name: 'screen',
@@ -124,6 +135,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '民众上报', icon: '✉' },
       },
       {
+        path: 'audit',
+        name: 'audit',
+        component: () => import('@/views/AuditView.vue'),
+        meta: { title: '审计记录', icon: '⧉' },
+      },
+      {
         path: 'system',
         name: 'system',
         component: () => import('@/views/SystemView.vue'),
@@ -137,6 +154,55 @@ const routes: RouteRecordRaw[] = [
 const router = createRouter({
   history: createWebHistory(),
   routes,
+})
+
+// ---------------------------------------------------------------------------
+// 登录守卫
+// ---------------------------------------------------------------------------
+// 按"**默认需要登录**"写：只有列在这里的路径放行。这样新增警务端页面
+// 时不会因为忘了加 meta 而裸奔，与后端的权限中间件（`permissions.is_public`）
+// 保持同一套思路。
+//
+// 注意这只是**体验层**：真正的拦截在后端中间件。前端守卫能被绕过
+// （改 JS 、直接调接口），所以不能拿它当安全边界。
+const PUBLIC_PATHS = ['/login', '/citizen']
+
+function isPublic(path: string): boolean {
+  return PUBLIC_PATHS.some((item) => path === item || path.startsWith(item + '/'))
+}
+
+router.beforeEach(async (to) => {
+  const auth = useAuthStore()
+
+  // 刷新页面后前端不知道"我是谁"（会话在 HttpOnly Cookie 里，JS 读不到），
+  // 所以首个路由要等一次 /auth/me。restore 幂等，之后不会重复请求
+  await auth.restore()
+
+  if (!isPublic(to.path) && !auth.isLoggedIn) {
+    // 把原本想去的地址带上，登录后能直接回到那里
+    return { path: '/login', query: to.fullPath === '/' ? {} : { redirect: to.fullPath } }
+  }
+
+  if (to.path === '/login' && auth.isLoggedIn) {
+    return { path: landingPathFor(auth.role) }
+  }
+
+  // 已登录，但目标页不在这个角色的可见范围（典型：审计员误闯 /dashboard，
+  // 页面接口会被后端全部 403，用户看到的是一屏空卡片）。
+  // 这里直接把它送回自己的首页，而不是让它进去踩一堆 403。
+  //
+  // 仅对出现在导航表上的路径生效：/screen、/citizen 这类不在表里的页面
+  // 不受影响；它们自己的接口权限仍然后端说了算。
+  const item = navItemForPath(to.path)
+  if (auth.isLoggedIn && item && !canSee(item, auth.role)) {
+    const landing = landingPathFor(auth.role)
+    // 比一下再跳，避免出现 A→B→A 的死循环
+    if (landing !== to.path) {
+      return { path: landing }
+    }
+  }
+
+  return true
 })
 
 /**

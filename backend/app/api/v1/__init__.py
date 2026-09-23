@@ -3,6 +3,7 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     accident,
+    auth,
     demo,
     detection,
     events,
@@ -17,6 +18,9 @@ from app.api.v1 import (
 )
 
 api_router = APIRouter()
+# 认证放最前。它的路由自身在 permissions 里是公开的，
+# 顺序上放前面只是为了让 /docs 里的分组好看
+api_router.include_router(auth.router)
 api_router.include_router(system.router)
 api_router.include_router(video.router)
 api_router.include_router(detection.router)

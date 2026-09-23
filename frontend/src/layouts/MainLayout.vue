@@ -10,9 +10,11 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 
+import { useAuthStore } from '@/stores/auth'
 import { useEventStore } from '@/stores/event'
 import { useSystemStore } from '@/stores/system'
 import { useVideoStore } from '@/stores/video'
+import { sidebarItems } from '@/config/nav'
 import { useWebSocket } from '@/composables/useWebSocket'
 import PwaPrompt from '@/components/PwaPrompt.vue'
 import {
@@ -26,23 +28,48 @@ const route = useRoute()
 const systemStore = useSystemStore()
 const videoStore = useVideoStore()
 const eventStore = useEventStore()
+const auth = useAuthStore()
 const { connected } = useWebSocket()
 
 const toast = ref('')
+const userMenuOpen = ref(false)
 
-const navItems = [
-  { name: 'dashboard', path: '/dashboard', label: '运行概览', icon: '◈' },
-  { name: 'wall', path: '/wall', label: '实时监控', icon: '▦' },
-  { name: 'map', path: '/map', label: '地图态势', icon: '◉' },
-  { name: 'accident', path: '/accident', label: '事故识别', icon: '⚡' },
-  { name: 'dispatch', path: '/dispatch', label: '警情调度', icon: '⚑' },
-  { name: 'surveillance', path: '/surveillance', label: '违停监控', icon: '⊙' },
-  { name: 'reports', path: '/reports', label: '民众上报', icon: '✉' },
-  { name: 'officers', path: '/officers', label: '警员管理', icon: '☰' },
-  { name: 'events', path: '/events', label: '告警中心', icon: '⚠' },
-  { name: 'roads', path: '/roads', label: '上海路网', icon: '⇄' },
-  { name: 'system', path: '/system', label: '系统状态', icon: '◎' },
-]
+/** 头像用姓名首字。姓名可能为空，退回警号 */
+const avatarText = computed(() => {
+  const name = auth.user?.name || auth.user?.officerId || '?'
+  return name.slice(0, 1)
+})
+
+/**
+ * 退出后整页跳转，而不是 router.push。
+ *
+ * 值班室是共用机器：所有内存状态（视频流、地图实例、WebSocket、
+ * 上一个登录者的页面数据）必须随页面一起销毁，不能留给下一位。
+ */
+function onLogout(): void {
+  userMenuOpen.value = false
+  void auth.logout().finally(() => {
+    window.location.href = '/login'
+  })
+}
+
+/**
+ * 每项标注可访问的角色。不写 ``roles`` 表示所有已登录角色都能看。
+ *
+ * 这层过滤只是体验：真正的拦截在后端。审计员若看到一堆点不动的菜单，
+ * 会以为系统坏了 —— 所以这里按后端规则同步收起来。
+ *
+ * 定义放在 `@/config/nav`，因为路由守卫也要用同一份来判断落地页。
+ */
+const visibleNav = computed(() => sidebarItems(auth.user?.role))
+
+/**
+ * 是否该拉值班业务数据（相机列表、运行统计）。
+ *
+ * 审计员在后端拿不到这些接口，不拦一下的话控制台会挂一串 403，
+ * 侧栏"视频源"也永远是破折号 —— 看起来像系统出了故障。
+ */
+const readsOperational = computed(() => auth.hasRole('admin', 'dispatcher', 'viewer'))
 
 const healthBadge = computed(() => {
   const health = systemStore.health
@@ -81,7 +108,7 @@ function handleKeydown(e: KeyboardEvent): void {
 
 onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
-  if (!videoStore.cameras.length) {
+  if (readsOperational.value && !videoStore.cameras.length) {
     void videoStore.loadCameras(8, false)
   }
 })
@@ -101,6 +128,7 @@ watch(toast, (value) => {
 // 每 15 秒刷新一次统计与健康
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 onMounted(() => {
+  if (!readsOperational.value) return
   refreshTimer = setInterval(() => {
     void systemStore.refresh()
   }, 15_000)
@@ -145,7 +173,7 @@ watch(
 
       <nav class="nav">
         <RouterLink
-          v-for="item in navItems"
+          v-for="item in visibleNav"
           :key="item.name"
           :to="item.path"
           class="nav-item"
@@ -206,6 +234,39 @@ watch(
             <span class="badge-label">待复核</span>
             {{ pendingCount }}
           </span>
+
+          <!-- 当前登录者。角色不同看到的导航也不同，这里能看到"我是谁" -->
+          <div class="user-box">
+            <button
+              class="user-btn"
+              :class="{ open: userMenuOpen }"
+              title="账号"
+              @click="userMenuOpen = !userMenuOpen"
+            >
+              <span class="user-avatar">{{ avatarText }}</span>
+              <span class="user-text">
+                <strong>{{ auth.displayName }}</strong>
+                <em>{{ auth.user?.roleLabel }}</em>
+              </span>
+            </button>
+
+            <!--
+              透明遮罩负责"点别处关闭"。比 document 上挂全局监听简单，
+              也不会忘记在卸载时移除
+            -->
+            <div v-if="userMenuOpen" class="menu-backdrop" @click="userMenuOpen = false" />
+
+            <div v-if="userMenuOpen" class="user-dropdown">
+              <div class="menu-head">
+                <strong>{{ auth.displayName }}</strong>
+                <span class="mono">{{ auth.user?.officerId }}</span>
+                <span class="menu-role">
+                  {{ auth.user?.roleLabel }} · {{ auth.user?.roleHint }}
+                </span>
+              </div>
+              <button class="menu-item danger" @click="onLogout">退出登录</button>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -710,4 +771,120 @@ kbd {
   }
 }
 
+/* ---------------------------------------------------------------- 用户菜单 */
+
+.user-box {
+  position: relative;
+}
+.user-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 4px 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-panel-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.user-btn:hover,
+.user-btn.open {
+  border-color: var(--accent-dim);
+}
+.user-avatar {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #05202a;
+  font-size: 12px;
+  font-weight: 700;
+}
+.user-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.3;
+}
+.user-text strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+.user-text em {
+  font-size: 10px;
+  font-style: normal;
+  color: var(--text-faint);
+}
+
+/* 透明遮罩负责"点别处关闭"：比在 document 上挂全局监听简单，
+  也不会忘记在组件卸载时移除 */
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+.user-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 41;
+  min-width: 224px;
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--bg-panel);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.42);
+}
+.menu-head {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 10px 10px;
+  margin-bottom: 5px;
+  border-bottom: 1px solid var(--border);
+}
+.menu-head strong {
+  font-size: 13px;
+}
+.menu-head .mono {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.menu-role {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+.menu-item {
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.menu-item:hover {
+  background: var(--bg-panel-2);
+}
+.menu-item.danger:hover {
+  color: #f87171;
+}
+
+/* 窄屏只留头像圆点：顶栏本来就有实时连接、健康、待复核三个徒章，
+   再加一段姓名会把页面标题挤掉 */
+@media (max-width: 900px) {
+  .user-text {
+    display: none;
+  }
+  .user-btn {
+    padding: 3px;
+  }
+}
 </style>

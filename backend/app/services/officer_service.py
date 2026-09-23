@@ -121,6 +121,76 @@ def get_by_object_id(object_id: str) -> Optional[Officer]:
     return _to_officer(document) if document else None
 
 
+# ==========================================================================
+# 认证字段
+# ==========================================================================
+# 下面三个函数刻意返回**原始字典**而不是 `Officer` 模型。
+#
+# `Officer` 里没有 password_hash / role 字段，`_to_officer` 转换时会顺手丢掉
+# 它们 —— 这正是我们要的：除了认证流程，没有别的路径拿得到密码哈希。
+# 反过来，认证流程需要它，所以只能绕过模型直接读文档。
+
+# 投影必须包含**认证流程读的所有字段**。曾漏掉 failed_attempts / locked_until，
+# 导致投影模式下这两个字段永远读不到：失败计数每次都从 0 开始，
+# 锁定阈值永远达不到 —— 防暴力破解形同虚设，而接口不会有任何报错。
+_CREDENTIAL_FIELDS = {
+    'officer_id': 1, 'name': 1, 'unit': 1, 'status': 1,
+    'password_hash': 1, 'role': 1,
+    'failed_attempts': 1, 'locked_until': 1, 'last_login_at': 1,
+}
+
+
+def get_credential(officer_id: str) -> Optional[Dict[str, Any]]:
+    """取认证所需的字段（含 `password_hash`）。**仅供 auth_service 调用。**"""
+    try:
+        return _collection().find_one({OFFICER_ID: officer_id}, _CREDENTIAL_FIELDS)
+    except PyMongoError as exc:
+        raise OfficerError(f'查询警员凭据失败：{exc}') from exc
+
+
+def set_password_hash(officer_id: str, password_hash: str) -> bool:
+    return _update_credential(officer_id, {'password_hash': password_hash})
+
+
+def set_role(officer_id: str, role: str) -> bool:
+    return _update_credential(officer_id, {'role': role})
+
+
+def set_credential(officer_id: str, password_hash: str, role: str) -> bool:
+    return _update_credential(officer_id, {'password_hash': password_hash, 'role': role})
+
+
+def _update_credential(officer_id: str, fields: Dict[str, Any]) -> bool:
+    try:
+        result = _collection().update_one({OFFICER_ID: officer_id}, {'$set': fields})
+    except PyMongoError as exc:
+        raise OfficerError(f'更新警员凭据失败：{exc}') from exc
+    return result.matched_count > 0
+
+
+def update_auth_state(officer_id: str, fields: Dict[str, Any]) -> bool:
+    """更新认证状态字段（失败计数、锁定时间、最近登录时间）。
+
+    与 `set_credential` 分开命名：那个改的是"身份"（密码、角色），
+    这个改的是"登录过程的状态"。混在一起容易在审计时看不清改了什么。
+    """
+    return _update_credential(officer_id, fields)
+
+
+def count_with_credentials() -> int:
+    """统计已设置口令的警员数。
+
+    启动自检用：为 0 时所有人都登不进去，而日志里只看到一串 401，
+    很难联想到"还没有账号"。
+    """
+    try:
+        return int(
+            _collection().count_documents({'password_hash': {'$exists': True, '$ne': ''}})
+        )
+    except PyMongoError as exc:
+        raise OfficerError(f'统计可登录账号失败：{exc}') from exc
+
+
 def list_available() -> List[Officer]:
     """返回可参与派警的警员（在岗 / 出警中）。"""
     try:
