@@ -9,6 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # backend/ 目录（app/core/config.py → parents[2]）
@@ -88,7 +89,13 @@ class Settings(BaseSettings):
     # 目标在特征图上的尺寸仍远小于模型的训练分布。
     # 实测同一帧同一模型：640 检出 1 个目标，960 检出 7 个。
     # 代价是单帧耗时约 130ms -> 200ms，对秒级检测完全可接受。
-    yolo_image_size: int = 960
+    #
+    # 同时接受 YOLO_IMGSZ 写法：早期 .env.example 误写为该名，
+    # 与字段名不一致导致这一项从未生效（默认值恰好相同，掩盖了问题）。
+    yolo_image_size: int = Field(
+        default=960,
+        validation_alias=AliasChoices('yolo_image_size', 'yolo_imgsz', 'imgsz'),
+    )
     # 模型文件搜索目录（相对 backend/，用于定位 yolov8n.pt）
     yolo_model_dirs: str = '.,../traffic_monitor'
 
