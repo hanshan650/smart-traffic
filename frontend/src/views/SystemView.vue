@@ -8,11 +8,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 
-import { detectionApi } from '@/api'
+import { detectionApi, systemApi } from '@/api'
 import { describeError } from '@/api/client'
 import { useSystemStore } from '@/stores/system'
 import { useVideoStore } from '@/stores/video'
-import type { ModelStatus } from '@/types/api'
+import type { ModelStatus, RuntimeConfigSaveResult, RuntimeConfigState } from '@/types/api'
 
 const systemStore = useSystemStore()
 const videoStore = useVideoStore()
@@ -64,6 +64,99 @@ const checks = computed<CheckItem[]>(() => {
   ]
 })
 
+// ==========================================================================
+// 在线修改配置
+// ==========================================================================
+
+const runtime = ref<RuntimeConfigState | null>(null)
+const runtimeLoading = ref(false)
+/** 编辑中的值：key -> 新值。只放用户真正改过的项 */
+const drafts = ref<Record<string, string>>({})
+const token = ref('')
+const saving = ref(false)
+const runtimeError = ref('')
+const saveResult = ref<RuntimeConfigSaveResult | null>(null)
+
+/**
+ * 口令只记在本会话内，免得每保存一次都要重输。
+ *
+ * 用 sessionStorage 而非 localStorage：关掉标签页即清除，
+ * 不在设备上长期留一份"能改服务器配置"的凭据。
+ */
+const TOKEN_KEY = 'smart-traffic:runtime-config-token'
+
+async function loadRuntime(): Promise<void> {
+  runtimeLoading.value = true
+  runtimeError.value = ''
+  try {
+    runtime.value = await systemApi.runtimeConfig()
+  } catch (err) {
+    runtimeError.value = describeError(err).message
+  } finally {
+    runtimeLoading.value = false
+  }
+}
+
+/**
+ * 只提交改动过的项。
+ *
+ * 必须这样：服务端回显的是打码值（含 `*`），把没改的项一并提交上去，
+ * 等于把 `6bd4******45ef` 这种字符串写进 .env。
+ */
+const dirty = computed<Record<string, string>>(() => {
+  const out: Record<string, string> = {}
+  for (const item of runtime.value?.items ?? []) {
+    const draft = drafts.value[item.key]
+    if (draft !== undefined && draft !== item.value) out[item.key] = draft
+  }
+  return out
+})
+
+const dirtyCount = computed(() => Object.keys(dirty.value).length)
+
+function onEdit(key: string, value: string): void {
+  drafts.value[key] = value
+}
+
+async function save(): Promise<void> {
+  if (!dirtyCount.value) {
+    runtimeError.value = '没有改动需要保存'
+    return
+  }
+  saving.value = true
+  runtimeError.value = ''
+  saveResult.value = null
+  try {
+    const result = await systemApi.saveRuntimeConfig({
+      token: token.value,
+      values: dirty.value,
+    })
+    saveResult.value = result
+    runtime.value = result.config
+    drafts.value = {}
+    sessionStorage.setItem(TOKEN_KEY, token.value)
+  } catch (err) {
+    runtimeError.value = describeError(err).message
+  } finally {
+    saving.value = false
+  }
+}
+
+function resetDrafts(): void {
+  drafts.value = {}
+  saveResult.value = null
+  runtimeError.value = ''
+}
+
+/**
+ * 改过高德相关项后需要刷新页面才生效：
+ * 地图实例在挂载时读一次 `systemStore.config`，之后不会再取。
+ * 不提示的话，用户会以为保存失败了。
+ */
+const needReload = computed(
+  () => !!saveResult.value?.changed.some((key) => key.startsWith('AMAP_')),
+)
+
 async function refresh(): Promise<void> {
   await systemStore.bootstrap()
   try {
@@ -98,8 +191,10 @@ async function probe(): Promise<void> {
 }
 
 onMounted(() => {
+  token.value = sessionStorage.getItem(TOKEN_KEY) ?? ''
   void refresh()
   void videoStore.loadSources()
+  void loadRuntime()
 })
 </script>
 
@@ -206,6 +301,74 @@ onMounted(() => {
           </div>
         </div>
       </section>
+
+      <!-- 在线修改配置（默认关闭，写入服务器配置属于敏感操作） -->
+      <section class="panel">
+        <div class="panel-title">
+          ✎ 在线修改配置
+          <span
+            v-if="runtime"
+            class="title-tag"
+            :class="runtime.enabled ? 'tag-ok' : 'tag-off'"
+          >
+            {{ runtime.enabled ? '已启用' : '默认关闭' }}
+          </span>
+        </div>
+
+        <div v-if="runtimeLoading" class="cfg-note">读取中…</div>
+
+        <template v-else-if="runtime">
+          <!-- 关闭时把"为什么关着、怎么打开"直接写出来，而不是只给一个灰按钮 -->
+          <div v-if="!runtime.enabled" class="cfg-note cfg-note-off">
+            {{ runtime.reason }}
+          </div>
+
+          <template v-else>
+            <p class="cfg-hint">
+              保存后立即生效，无需重启服务。值写回
+              <span class="mono">{{ runtime.envPath }}</span>
+              ，原有注释与其他键不受影响。
+            </p>
+
+            <div class="cfg-list">
+              <label v-for="item in runtime.items" :key="item.key" class="cfg-row">
+                <span class="cfg-key mono">{{ item.key }}</span>
+                <input
+                  class="cfg-input"
+                  :value="drafts[item.key] ?? ''"
+                  :placeholder="item.value || '未配置'"
+                  spellcheck="false"
+                  autocomplete="off"
+                  @input="onEdit(item.key, ($event.target as HTMLInputElement).value)"
+                />
+              </label>
+            </div>
+
+            <div class="cfg-actions">
+              <input
+                v-model="token"
+                class="cfg-input cfg-token"
+                type="password"
+                placeholder="保存口令（.env 里的 RUNTIME_CONFIG_TOKEN）"
+                autocomplete="off"
+              />
+              <button class="btn" :disabled="saving || !dirtyCount" @click="save">
+                {{ saving ? '保存中…' : `保存${dirtyCount ? ` (${dirtyCount})` : ''}` }}
+              </button>
+              <button class="btn" :disabled="!dirtyCount" @click="resetDrafts">撤销</button>
+            </div>
+
+            <p v-if="runtimeError" class="cfg-msg cfg-msg-error">{{ runtimeError }}</p>
+            <p v-if="saveResult" class="cfg-msg cfg-msg-ok">{{ saveResult.message }}</p>
+            <p v-if="saveResult?.rejected.length" class="cfg-msg cfg-msg-warn">
+              被拒绝：{{ saveResult.rejected.join('；') }}
+            </p>
+            <p v-if="needReload" class="cfg-msg cfg-msg-warn">
+              高德配置已写入，但当前页面用的仍是旧值 —— 刷新后生效。
+            </p>
+          </template>
+        </template>
+      </section>
     </div>
 
     <!-- 后端原始健康数据 -->
@@ -310,5 +473,104 @@ onMounted(() => {
   color: var(--text-dim);
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+/* -------------------------------------------------- 在线修改配置 */
+
+.title-tag {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.tag-ok {
+  background: rgba(74, 222, 128, 0.16);
+  color: #4ade80;
+}
+.tag-off {
+  background: var(--bg-panel-2);
+  color: var(--text-faint);
+}
+
+.cfg-note {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg-panel-2);
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.7;
+}
+/* 关闭状态用左侧色条强调：这条信息是"怎么打开"，不是普通说明 */
+.cfg-note-off {
+  border-left: 3px solid #d97706;
+}
+
+.cfg-hint {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-dim);
+}
+
+.cfg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cfg-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cfg-key {
+  flex: 0 0 210px;
+  font-size: 12px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cfg-input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel-2);
+  color: var(--text);
+  /* ≥16px：更小的字号在 iOS 上聚焦时会把整页放大且不缩回 */
+  font-size: 16px;
+  box-sizing: border-box;
+}
+.cfg-input:focus {
+  outline: none;
+  border-color: var(--accent-dim);
+}
+
+.cfg-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.cfg-token {
+  flex: 1 1 200px;
+}
+
+.cfg-msg {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.cfg-msg-ok {
+  color: #4ade80;
+}
+.cfg-msg-error {
+  color: #f87171;
+}
+.cfg-msg-warn {
+  color: #fbbf24;
 }
 </style>

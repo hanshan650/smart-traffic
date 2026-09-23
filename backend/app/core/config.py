@@ -210,6 +210,26 @@ class Settings(BaseSettings):
     citizen_demo_enabled: bool = True
 
     # ------------------------------------------------------------------
+    # 运行时配置编辑（网页上填写高德 Key / 视频源地址）
+    # ------------------------------------------------------------------
+    # 是否允许在 /system 页面填写配置并写回 .env，省掉"改配置 → 重启服务"。
+    #
+    # **默认关闭**。这是个有安全含义的功能：开启后，任何能打开该页面的人
+    # 都能改高德 Key 和上游视频源地址 —— 后者被改到任意主机上就是个
+    # SSRF 入口。它面向的是本机部署 / 答辩演示这类受控环境，不是生产形态。
+    runtime_config_enabled: bool = False
+    # 保存时要求的口令。为空视为未启用 ——
+    # 不能让"开关开着但没设口令"变成任何人可写。
+    runtime_config_token: str = ''
+    # 允许在网页上修改的键（逗号分隔白名单）。
+    # 名单外的键一律拒绝：否则等于给了一个改写 .env 的通用后门，
+    # 连 MONGO_URI 都能被指向别处。
+    runtime_config_keys: str = (
+        'AMAP_JS_KEY,AMAP_WEB_KEY,AMAP_JS_SECURITY_CODE,'
+        'HNGS_API_BASE,HNGS_REFERER,HNGS_DEFAULT_CAMERA'
+    )
+
+    # ------------------------------------------------------------------
     # 派生属性
     # ------------------------------------------------------------------
     @property
@@ -219,6 +239,10 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> List[str]:
         return [item.strip() for item in self.cors_origins.split(',') if item.strip()]
+
+    @property
+    def runtime_config_key_list(self) -> List[str]:
+        return [item.strip().upper() for item in self.runtime_config_keys.split(',') if item.strip()]
 
     @property
     def yolo_search_dirs(self) -> List[Path]:

@@ -238,6 +238,38 @@ export interface ClientConfig {
   videoSource: string
 }
 
+/** 可在网页上修改的一项配置 */
+export interface RuntimeConfigItem {
+  key: string
+  /** 已打码的当前值 —— 服务端只回显头尾几位，不返回完整密钥 */
+  value: string
+  configured: boolean
+}
+
+/**
+ * 运行时配置的当前状态。
+ *
+ * 功能默认关闭（写入服务器配置属于敏感操作）；
+ * ``enabled`` 为 false 时，``reason`` 会说明原因与开启方式。
+ */
+export interface RuntimeConfigState {
+  success: boolean
+  enabled: boolean
+  reason: string
+  envPath: string
+  envExists: boolean
+  items: RuntimeConfigItem[]
+}
+
+export interface RuntimeConfigSaveResult {
+  success: boolean
+  changed: string[]
+  /** 被拒绝的键及原因（不在白名单内、值含换行等） */
+  rejected: string[]
+  message: string
+  config: RuntimeConfigState
+}
+
 export interface ModelStatus {
   available: boolean
   reason: string

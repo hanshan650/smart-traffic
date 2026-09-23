@@ -30,6 +30,8 @@ import type {
   OfficerStats,
   OwnerLookupResult,
   RoadNetwork,
+  RuntimeConfigSaveResult,
+  RuntimeConfigState,
   ScenarioInfo,
   SimulationResult,
   SourceListResponse,
@@ -51,6 +53,19 @@ export const systemApi = {
   stats: () => http.get<StatsOverview>('/stats').then((r) => r.data),
 
   config: () => http.get<ClientConfig>('/config').then((r) => r.data),
+
+  /** 列出可在网页上修改的配置项（默认关闭，见 .env 的 RUNTIME_CONFIG_ENABLED） */
+  runtimeConfig: () =>
+    http.get<RuntimeConfigState>('/runtime-config').then((r) => r.data),
+
+  /**
+   * 保存配置到 backend/.env（无需重启，服务端会热更新内存配置）。
+   *
+   * 需要口令，且服务端按白名单校验 —— 名单外的键会被拒绝，
+   * 拒绝原因在返回的 ``rejected`` 里。
+   */
+  saveRuntimeConfig: (payload: { token: string; values: Record<string, string> }) =>
+    http.post<RuntimeConfigSaveResult>('/runtime-config', payload).then((r) => r.data),
 }
 
 // ==========================================================================
