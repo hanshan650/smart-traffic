@@ -40,7 +40,14 @@ const installDismissed = ref(false)
 /** 当前该显示哪条提示。同一时刻只显示一条，避免堆叠。 */
 const active = computed(() => {
   if (offline.value) return 'offline'
-  if (needRefresh.value) return 'update'
+  /*
+    只在生产环境提示更新。
+    vite.config.ts 开了 devOptions.enabled 以便在本机验证“可安装 / 离线”，
+    代价是开发模式下每次改动都会重新生成 Service Worker ——
+    needRefresh 于是永远为真，这条提示会一直挂在屏幕上。
+    开发时它没有意义（刷新一次马上又会有新版本），反而遮住界面。
+  */
+  if (import.meta.env.PROD && needRefresh.value) return 'update'
   if (props.citizen && installEvent.value && !installDismissed.value) return 'install'
   return ''
 })
@@ -140,17 +147,16 @@ onBeforeUnmount(() => {
   left: 50%;
   transform: translateX(-50%);
   /*
-    贴在底部 Tab 上方。
-    58 = Tab 高 50 + 8 的间距。原先是 66，那是按旧布局（Tab 更矮）估的，
-    实测会压到地图页的底部事件条上 —— 提示条出现在用户正看的事件上很别扭。
+    贴在底部 Tab 上方；宽物端没有 Tab，所以改为贴底。
+    两个值都随视口连续缩放，不用断点硬切 —— 断点处会看到提示条突然跳一下。
   */
-  bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(clamp(50px, 4.2vw + 38px, 66px) + env(safe-area-inset-bottom, 0px));
   z-index: 1600;
   display: flex;
   align-items: center;
   gap: 10px;
   width: min(440px, calc(100vw - 20px));
-  padding: 9px 12px;
+  padding: clamp(7px, 0.6vw + 5px, 11px) clamp(10px, 0.8vw + 7px, 15px);
   border-radius: 12px;
   background: #ffffff;
   border: 1px solid #e2e8f0;
@@ -170,8 +176,8 @@ onBeforeUnmount(() => {
 
 .pwa-icon {
   flex: 0 0 auto;
-  width: 26px;
-  height: 26px;
+  width: clamp(24px, 1.6vw + 18px, 30px);
+  height: clamp(24px, 1.6vw + 18px, 30px);
   display: grid;
   place-items: center;
   border-radius: 8px;
@@ -207,7 +213,7 @@ onBeforeUnmount(() => {
 
 .pwa-btn {
   flex: 0 0 auto;
-  padding: 6px 13px;
+  padding: 6px clamp(10px, 0.8vw + 7px, 15px);
   border: none;
   border-radius: 9px;
   background: #1d4ed8;
@@ -215,8 +221,8 @@ onBeforeUnmount(() => {
   font-size: var(--fs-sm, 12px);
   font-weight: 600;
   cursor: pointer;
-  /* 移动端点按目标不小于 36px，避免手指够不准 */
-  min-height: 36px;
+  /* 点按目标不小于 36px，避免手指够不准 */
+  min-height: clamp(32px, 2vw + 24px, 40px);
 }
 .pwa-btn:active {
   transform: scale(0.97);
@@ -251,6 +257,14 @@ onBeforeUnmount(() => {
 @media (min-width: 768px) {
   .pwa-bar {
     bottom: 16px;
+  }
+}
+
+/* 尊重系统的"减少动态效果"设置 */
+@media (prefers-reduced-motion: reduce) {
+  .pwa-slide-enter-active,
+  .pwa-slide-leave-active {
+    transition: none;
   }
 }
 

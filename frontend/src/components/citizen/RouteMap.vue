@@ -691,11 +691,16 @@ function pickRoad(road: string): void {
 .map-wrap {
   position: relative;
   width: 100%;
-  /* 地图是主视图，占满视口剩余空间。
-     用 dvh 而非 vh：移动端浏览器地址栏收起时 vh 不会更新，
-     底部会露出一截被遮住的地图 */
-  height: calc(100dvh - 232px);
-  min-height: 460px;
+  /*
+    地图是主视图，占满视口剩余空间。
+    用 dvh 而非 vh：移动端浏览器地址栏收起时 vh 不会更新，
+    底部会露出一截被遮住的地图。
+
+    减去的外壳高度也随视口缩放（头部内边距是 clamp 的），
+    写死 232 会在中间尺寸上要么留白、要么溢出。
+  */
+  height: calc(100dvh - clamp(190px, 9vw + 155px, 232px));
+  min-height: clamp(420px, 30vh + 180px, 520px);
   border-radius: var(--c-radius);
   overflow: hidden;
   border: 1px solid var(--c-border);
@@ -760,20 +765,21 @@ function pickRoad(road: string): void {
 
 .topbar {
   position: absolute;
-  top: 10px;
-  left: 10px;
-  right: 10px;
+  top: clamp(8px, 0.4vw + 6.4px, 10px);
+  left: clamp(8px, 0.4vw + 6.4px, 10px);
+  right: clamp(8px, 0.4vw + 6.4px, 10px);
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: clamp(6px, 0.3vw + 5px, 8px);
   z-index: 12;
 }
 
 .road-card {
   flex: 1;
   min-width: 0;
-  padding: 7px 10px;
-  border-radius: 10px;
+  /* 内外边距都随视口连续变，不再随断点跳变 */
+  padding: clamp(6px, 0.4vw + 4.4px, 10px) clamp(9px, 0.5vw + 7px, 13px);
+  border-radius: clamp(9px, 0.4vw + 7.4px, 12px);
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(6px);
   box-shadow: 0 2px 14px rgba(15, 23, 42, 0.18);
@@ -838,12 +844,12 @@ function pickRoad(road: string): void {
   gap: 5px;
 }
 .icon-btn {
-  width: 36px;
-  height: 36px;
+  width: clamp(34px, 1.2vw + 29px, 42px);
+  height: clamp(34px, 1.2vw + 29px, 42px);
   display: grid;
   place-items: center;
   border: none;
-  border-radius: 10px;
+  border-radius: clamp(9px, 0.4vw + 7.4px, 12px);
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(6px);
   box-shadow: 0 2px 14px rgba(15, 23, 42, 0.18);
@@ -1164,18 +1170,6 @@ function pickRoad(road: string): void {
 
 /* 窄屏：地图铺满宽度，去侧边框拿回几像素视觉空间 */
 @media (max-width: 767px) {
-  /* 展开后不要占太多：地图才是这一页的主体 */
-  .bottom-sheet:not(.collapsed) {
-    max-height: 40%;
-  }
-  .road-card {
-    padding: 6px 9px;
-  }
-  .topbar {
-    top: 8px;
-    left: 8px;
-    right: 8px;
-  }
   .sheet-body {
     padding: 0 12px 10px;
   }
