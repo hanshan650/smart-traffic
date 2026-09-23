@@ -605,6 +605,176 @@ export interface DispatchAlgorithmInfo {
 }
 
 // ==========================================================================
+// 持续检测（违停监控）
+// ==========================================================================
+
+/** 巡检到的单个目标的判定结果 */
+export interface WatchVerdict {
+  trackId: number
+  className: string
+  stationarySeconds: number
+  score: number
+  alert: boolean
+  suppressed: boolean
+  suppressReason: string
+}
+
+/** 单路摄像头的巡检状态 */
+export interface CameraWatchState {
+  cameraId: string
+  cameraName: string
+  hintText: string
+  roadId: string
+  enabled: boolean
+  rounds: number
+  framesAnalyzed: number
+  alertsRaised: number
+  lastRoundAt?: string | null
+  lastRoundMs: number
+  lastError: string
+  lastSnapshot: string
+  zoneType: string
+  zoneLabel: string
+  zoneMessage: string
+  parkingAllowed: boolean
+  trackCount: number
+  stationaryCount: number
+  crowded: boolean
+  crowdRatio: number
+  activeTracks: number
+  verdicts: WatchVerdict[]
+}
+
+export interface SurveillanceStatus {
+  success: boolean
+  running: boolean
+  startedAt?: string | null
+  uptimeSeconds: number
+  interval: number
+  frameCount: number
+  lastError: string
+  cameras: CameraWatchState[]
+  totals: {
+    cameras: number
+    rounds: number
+    framesAnalyzed: number
+    alertsRaised: number
+  }
+}
+
+/** 违停告警中的单条判据 */
+export interface AlertEvidence {
+  name: string
+  label: string
+  rawValue: number
+  score: number
+  weight: number
+  contribution: number
+  detail: string
+}
+
+export type AlertStatus = 'pending' | 'verified' | 'dismissed' | 'handled'
+
+export interface StallAlert {
+  id: string
+  cameraId: string
+  cameraName: string
+  roadId: string
+  trackId: number
+  className: string
+  stationarySeconds: number
+  score: number
+  displacement: number
+  zoneType: string
+  zoneLabel: string
+  snapshotUrl: string
+  evidences: AlertEvidence[]
+  plate: string
+  plateSimulated: boolean
+  plateMessage: string
+  plateCharHeight: number
+  plateReadability: string
+  status: AlertStatus
+  note: string
+  createdAt?: string | null
+}
+
+export interface ChannelInfo {
+  key: string
+  displayName: string
+  available: boolean
+  reason: string
+}
+
+export interface SurveillanceAlgorithm {
+  success: boolean
+  detection: {
+    name: string
+    scenario: string
+    criterions: { name: string; label: string; formula: string; rationale: string }[]
+    suppressions: { name: string; label: string; detail: string }[]
+    weights: Record<string, number>
+    config: Record<string, number>
+  }
+  scheduler: {
+    intervalSeconds: number
+    frameCount: number
+    alertCooldownSeconds: number
+    note: string
+  }
+  sceneText: { current: string; channels: ChannelInfo[] }
+  plate: {
+    current: string
+    channels: ChannelInfo[]
+    readableCharHeight: number
+    note: string
+  }
+  ownerLookup: { current: string; channels: ChannelInfo[]; compliance: string }
+}
+
+/** 车主信息（除 plate 外均为**脱敏后**的值） */
+export interface OwnerRecord {
+  found: boolean
+  plate: string
+  ownerName: string
+  ownerIdMasked: string
+  ownerPhoneMasked: string
+  vehicleBrand: string
+  vehicleColor: string
+  registerDate: string
+  vehicleType: string
+  source: string
+  simulated: boolean
+  message: string
+}
+
+export interface OwnerLookupResult {
+  success: boolean
+  owner: OwnerRecord
+  audit: {
+    at: string
+    operator: string
+    reason: string
+    outcome: string
+    persisted: boolean
+  }
+}
+
+export interface LookupAuditEntry {
+  at: string
+  plate: string
+  operator: string
+  reason: string
+  purpose: string
+  source: string
+  outcome: string
+  message: string
+  incidentId: string
+  cameraId: string
+  persisted: boolean
+}
+
+// ==========================================================================
 // WebSocket
 // ==========================================================================
 
@@ -728,4 +898,33 @@ export const DISPATCH_STRATEGY_LABEL: Record<DispatchStrategy, string> = {
   nearest: '就近优先',
   balanced: '负载均衡',
   skill: '技能优先',
+}
+
+// ---------------- 违停监控展示辅助 ----------------
+
+export const ALERT_STATUS_LABEL: Record<AlertStatus, string> = {
+  pending: '待核查',
+  verified: '已确认违停',
+  dismissed: '误报',
+  handled: '已处置',
+}
+
+export const ALERT_STATUS_COLOR: Record<AlertStatus, string> = {
+  pending: '#facc15',
+  verified: '#ef4444',
+  dismissed: '#64748b',
+  handled: '#10b981',
+}
+
+/** 车牌可读性等级 → 展示文案 */
+export const READABILITY_LABEL: Record<string, string> = {
+  readable: '可读',
+  marginal: '临界',
+  unreadable: '不可读',
+}
+
+export const READABILITY_COLOR: Record<string, string> = {
+  readable: '#10b981',
+  marginal: '#facc15',
+  unreadable: '#64748b',
 }

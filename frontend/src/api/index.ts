@@ -11,6 +11,7 @@ import type {
   AmapRoute,
   AnalyzeResult,
   CameraListResponse,
+  CameraWatchState,
   ClientConfig,
   DetectionResult,
   DispatchAlgorithmInfo,
@@ -22,16 +23,21 @@ import type {
   Incident,
   IncidentListResponse,
   IncidentStats,
+  LookupAuditEntry,
   ModelStatus,
   Officer,
   OfficerListResponse,
   OfficerStats,
+  OwnerLookupResult,
   RoadNetwork,
   ScenarioInfo,
   SimulationResult,
   SourceListResponse,
+  StallAlert,
   StatsOverview,
   StreamUrlResponse,
+  SurveillanceAlgorithm,
+  SurveillanceStatus,
   TrafficEvent,
 } from '@/types/api'
 
@@ -302,5 +308,101 @@ export const incidentApi = {
   updateStatus: (incidentId: string, action: string, note = '') =>
     http
       .post<Incident>(`/incidents/${incidentId}/status`, null, { params: { action, note } })
+      .then((r) => r.data),
+}
+
+// ==========================================================================
+// 持续检测（违停监控）
+// ==========================================================================
+
+export const surveillanceApi = {
+  /** 巡检运行状态与各路统计 */
+  status: () => http.get<SurveillanceStatus>('/surveillance/status').then((r) => r.data),
+
+  /**
+   * 开始巡检。
+   *
+   * `hints` 用于声明点位名称（如「京港澳高速许昌服务区入口」）——
+   * 名称含「服务区」「收费站」等关键词时该点位按可停车场所处理，不报违停。
+   */
+  start: (cameraIds: string[] = [], hints: Record<string, string> = {}) =>
+    http
+      .post<{ success: boolean; started: boolean; cameras: string[]; message: string }>(
+        '/surveillance/start',
+        { cameraIds, hints },
+        { timeout: 60000 },
+      )
+      .then((r) => r.data),
+
+  stop: () =>
+    http
+      .post<{ success: boolean; stopped: boolean; message: string }>('/surveillance/stop', {}, {
+        timeout: 60000,
+      })
+      .then((r) => r.data),
+
+  /** 暂停 / 恢复单路巡检 */
+  toggleCamera: (cameraId: string, enabled: boolean) =>
+    http
+      .post<{ success: boolean; camera: CameraWatchState }>(
+        `/surveillance/cameras/${cameraId}/toggle`,
+        null,
+        { params: { enabled } },
+      )
+      .then((r) => r.data),
+
+  /** 违停告警列表 */
+  alerts: (params: { limit?: number; cameraId?: string; status?: string } = {}) =>
+    http
+      .get<{ success: boolean; total: number; items: StallAlert[] }>('/surveillance/alerts', {
+        params,
+      })
+      .then((r) => r.data),
+
+  alertStats: () =>
+    http
+      .get<{ success: boolean; total: number; byStatus: Record<string, number>; withPlate: number }>(
+        '/surveillance/alerts/stats',
+      )
+      .then((r) => r.data),
+
+  alertDetail: (alertId: string) =>
+    http.get<StallAlert & { success: boolean }>(`/surveillance/alerts/${alertId}`).then((r) => r.data),
+
+  /** 告警处置（核验 / 误报 / 已处置） */
+  updateAlert: (alertId: string, status: string, note = '') =>
+    http
+      .post<StallAlert>(`/surveillance/alerts/${alertId}/status`, { status, note })
+      .then((r) => r.data),
+
+  /** 算法说明与三个适配器通道的可用状态 */
+  algorithm: () =>
+    http.get<SurveillanceAlgorithm>('/surveillance/algorithm').then((r) => r.data),
+
+  /**
+   * 车主信息查询。
+   *
+   * `operator` 与 `reason` 是**必填**的 —— 后端会直接拒绝缺失的请求。
+   * 返回的个人信息字段均已脱敏。
+   */
+  lookupOwner: (payload: {
+    plate: string
+    operator: string
+    reason: string
+    purpose?: string
+    provider?: string
+    alertId?: string
+    cameraId?: string
+  }) => http.post<OwnerLookupResult>('/surveillance/owner-lookup', payload).then((r) => r.data),
+
+  /** 车主查询审计留痕 */
+  audits: (params: { limit?: number; plate?: string } = {}) =>
+    http
+      .get<{
+        success: boolean
+        total: number
+        items: LookupAuditEntry[]
+        stats: { total: number; byOutcome: Record<string, number>; bySource: Record<string, number> }
+      }>('/surveillance/audits', { params })
       .then((r) => r.data),
 }

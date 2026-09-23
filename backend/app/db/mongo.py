@@ -93,6 +93,14 @@ def ensure_indexes() -> List[str]:
     )
     created.append('incidents(created_at, status, event, officer)')
 
+    # 车主信息查询审计。保留期限由合规要求决定，此处不设 TTL ——
+    # 审计记录被自动清理属于合规风险，应由运维按制度归档
+    audits = db['owner_query_audits']
+    audits.create_index([('at', DESCENDING)], name='idx_audit_at')
+    audits.create_index([('plate', ASCENDING)], name='idx_audit_plate')
+    audits.create_index([('operator', ASCENDING)], name='idx_audit_operator')
+    created.append('owner_query_audits(at, plate, operator)')
+
     return created
 
 
