@@ -124,3 +124,7 @@ datasets/
 # PWA 开发模式产物（vite-plugin-pwa 的 devOptions 在每次 dev 启动时重写，
 # 内容随版本号变化，提交它只会制造无意义的 diff）
 dev-dist/
+
+# 验证脚本的中间产物（esbuild 把 .ts 打包成 .mjs 供 node 直接执行）
+# 用 **/ 前缀：带斜杠的模式会锚定到本文件所在目录，而实际路径是 frontend/scripts/
+**/scripts/.tmp/

@@ -1,43 +1,86 @@
 <!--
-  路况首页
-  ========
-  民众打开这一页通常只想知道两件事：**现在能不能走**、**哪里有问题**。
+  路况首页（行进视角）
+  ====================
+  民众打开这一页通常只想知道一件事：**我现在这条路上，前面有没有事**。
 
-  所以信息按这个顺序排：
-    1. 一句整体判断（"部分路段拥堵"）—— 一秒内得到答案
-    2. 具体堵在哪（拥堵排行）
-    3. 有什么事件（事故、障碍物……）
+  所以默认进的是**地图视图**，并且地图是主体 —— 当前位置、所在路段状态、
+  前方事件都在地图里，不用去别处对照。列表视图保留给两个场景：
+  在地铁上不方便看地图、以及想把所有事件从上到下扫一遍。
 
   刻意不做的几件事：
     · 不显示摄像头编号、不显示 AI 检测快照 —— 后端不会返回，这里也没有
     · 不显示算法置信度 —— 对出行决策没有意义，反而容易被误读
+    · **不假装成真导航**：没有路网几何，算不出沿路里程与转向指引，
+      所以只标"约多少公里"，不喊"前方 300 米右转"
 -->
 <script setup lang="ts">
-import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { publicApi } from '@/api/citizen'
 import { describeError } from '@/api/client'
-import CongestionMap from '@/components/citizen/CongestionMap.vue'
+import RouteMap from '@/components/citizen/RouteMap.vue'
+import { useGeolocation } from '@/composables/useGeolocation'
 import { CITIZEN_CONGESTION_COLOR, CITIZEN_LEVEL_COLOR } from '@/types/citizen'
+import { formatDistance } from '@/utils/geo'
+import { buildRouteContext, roadOptions } from '@/utils/route'
 import { relativeTime } from '@/utils/time'
 import type { CongestionRankItem, PublicEvent, PublicOverview } from '@/types/citizen'
 
-/** 视图模式。做成切换而非两个 tab：路况信息一套，展示形式两种。 */
-type ViewMode = 'list' | 'map'
+/** 视图模式。默认地图 —— 这一页的主要用途是"看前面有什么" */
+type ViewMode = 'map' | 'list'
 
 const overview = ref<PublicOverview | null>(null)
 const events = ref<PublicEvent[]>([])
 const rank = ref<CongestionRankItem[]>([])
 const loading = ref(true)
 const error = ref('')
-const viewMode = ref<ViewMode>('list')
+const viewMode = ref<ViewMode>('map')
 
-// 地图与列表共用同一份数据；切到地图时不必重新请求
-const mapRank = computed(() => rank.value)
+/**
+ * 用户手动选定的路段。
+ *
+ * 存在的意义是"自动判定错了时能纠正"。没有定位、或用户根本不在
+ * 被监测的路段上时，这是他唯一能主动做的操作。
+ */
+const manualRoad = ref('')
 
-let timer: number | undefined
+const { state: geoState, fix: geoFix, message: geoMessage, start: startGeo } =
+  useGeolocation()
 
-/** 整体状态 → 视觉基调。绿/橙/红对应"能走 / 注意 / 有问题" */
+const roads = computed(() => roadOptions(events.value))
+
+/** 行进路段上下文。地图与列表共用这一份，避免两处各算一遍导致不一致 */
+const route = computed(() =>
+  buildRouteContext({
+    events: events.value,
+    fix: geoFix.value
+      ? { lat: geoFix.value.lat, lng: geoFix.value.lng, heading: geoFix.value.heading }
+      : null,
+    manualRoad: manualRoad.value || undefined,
+  }),
+)
+
+/**
+ * 本路段前方事件、已在身后的、以及远处的。
+ *
+ * 三个分区由 `utils/route.ts` 算好（含 50 公里上限），这里只消费结果 ——
+ * 分段规则如果散在模板里，地图与列表两份就很容易不一致。
+ */
+const aheadEvents = computed(() => route.value.ahead)
+const passedEvents = computed(() => route.value.passed)
+const farEvents = computed(() => route.value.far)
+
+/** 其他路段的展示条数上限，避免列表无限长 */
+const offRouteShown = computed(() => route.value.offRoute.slice(0, 15))
+
+/** 定位精度不可信时给个说明，免得用户把"路段判错了"当成系统故障 */
+const accuracyWarning = computed(() => {
+  const fix = geoFix.value
+  if (!fix) return ''
+  if (fix.accuracy > 500) return `定位精度约 ${Math.round(fix.accuracy)} 米，路段判断可能不准`
+  return ''
+})
+
 const tone = computed(() => {
   const key = overview.value?.overall
   if (key === 'attention') return { color: '#dc2626', bg: '#fef2f2', icon: '!' }
@@ -64,12 +107,25 @@ const congestionCards = computed(() => {
   ]
 })
 
+const currentStatus = computed(() => {
+  if (!route.value.currentRoad) return null
+  return rank.value.find((item) => item.roadName === route.value.currentRoad) ?? null
+})
+
+const statusColor = computed(
+  () => CITIZEN_CONGESTION_COLOR[currentStatus.value?.congestionLevel ?? ''] ?? '#64748b',
+)
+
+let timer: number | undefined
+
 async function load(): Promise<void> {
   try {
     const [o, t, r] = await Promise.all([
       publicApi.overview(),
-      publicApi.traffic({ limit: 20 }),
-      publicApi.rank(6),
+      // 取 100 条而不是 20：要按距离排序就得有足够样本，
+      // 只取 20 条时远处那条"约 30 公里"的事故可能根本不在结果里
+      publicApi.traffic({ limit: 100 }),
+      publicApi.rank(10),
     ])
     overview.value = o
     events.value = t.items
@@ -83,14 +139,24 @@ async function load(): Promise<void> {
 }
 
 onMounted(async () => {
+  // 定位与数据并行，不必等路况回来才请求权限
+  startGeo()
   await load()
-  // 路况变化以分钟计，30 秒刷新足够；再密只是徒增请求
   timer = window.setInterval(load, 30000)
 })
 
 onBeforeUnmount(() => {
   if (timer) window.clearInterval(timer)
 })
+
+function selectRoad(road: string): void {
+  manualRoad.value = road
+}
+
+/** 回到自动判定 */
+function clearManual(): void {
+  manualRoad.value = ''
+}
 </script>
 
 <template>
@@ -104,44 +170,19 @@ onBeforeUnmount(() => {
     </div>
 
     <template v-else>
-      <!-- 整体状态 -->
-      <section
-        class="c-card status-card"
-        :style="{ background: tone.bg, borderColor: tone.color + '33' }"
-      >
-        <span class="status-icon" :style="{ background: tone.color }">{{ tone.icon }}</span>
-        <div>
-          <h2 :style="{ color: tone.color }">{{ overview?.overallLabel }}</h2>
-          <p class="status-sub">
-            共 {{ overview?.eventTotal ?? 0 }} 条路况事件 ·
-            更新于 {{ relativeTime(overview?.generatedAt) }}
-          </p>
-        </div>
-      </section>
-
-      <!-- 事件级别。地图模式下隐藏：这些数字已经在地图内的浮层里了，
-           同时在两处展示只会让人怀疑哪一份才是最新的 -->
-      <section v-if="viewMode === 'list'" class="stat-row">
-        <div v-for="item in levelCards" :key="item.label" class="c-card stat">
-          <span class="stat-value" :style="{ color: item.color }">{{ item.value }}</span>
-          <span class="stat-label">{{ item.label }}</span>
-        </div>
-      </section>
-
-      <!-- 拥堵分布（仅列表模式） -->
-      <section v-if="viewMode === 'list'" class="c-card">
-        <h3 class="c-section-title">路段通行状况</h3>
-        <div class="congestion-row">
-          <div v-for="item in congestionCards" :key="item.label" class="congestion-item">
-            <span class="congestion-dot" :style="{ background: item.color }" />
-            <span class="congestion-value">{{ item.value }}</span>
-            <span class="congestion-label">{{ item.label }}</span>
-          </div>
-        </div>
-      </section>
-
-      <!-- 视图切换 -->
+      <!--
+        视图切换。
+        放在地图上方而不是浮在地图上：地图内已经有顶栏（路段状态）
+        和底栏（前方事件），再往里面塞按钮会互相抢位置。
+      -->
       <div class="view-switch">
+        <button
+          class="switch-btn"
+          :class="{ active: viewMode === 'map' }"
+          @click="viewMode = 'map'"
+        >
+          ◎ 行进
+        </button>
         <button
           class="switch-btn"
           :class="{ active: viewMode === 'list' }"
@@ -149,81 +190,245 @@ onBeforeUnmount(() => {
         >
           ☰ 列表
         </button>
-        <button
-          class="switch-btn"
-          :class="{ active: viewMode === 'map' }"
-          @click="viewMode = 'map'"
-        >
-          ◉ 地图
-        </button>
       </div>
 
-      <!--
-        地图视图。
-
-        通行状况与事件列表都作为**地图内的浮层**呈现（见 CongestionMap），
-        所以这里不再重复渲染外部卡片 —— 同一批数据在两处展示，
-        用户还得自己对照“地图上那个红点是列表里哪一条”。
-      -->
-      <CongestionMap
+      <!-- ============================ 地图视图 ============================ -->
+      <RouteMap
         v-if="viewMode === 'map'"
-        :rank="mapRank"
-        :events="events"
-        :overview="overview"
+        :fix="geoFix"
+        :geo-state="geoState"
+        :geo-message="geoMessage"
+        :route="route"
+        :rank="rank"
+        :roads="roads"
+        @locate="startGeo"
+        @select-road="selectRoad"
       />
 
-      <!-- 拥堵排行 -->
-      <section v-if="viewMode === 'list' && rank.length" class="c-card">
-        <h3 class="c-section-title">车流最集中的路段</h3>
-        <ul class="rank-list">
-          <li v-for="(item, index) in rank" :key="index" class="rank-item">
-            <span class="rank-no" :class="{ top: index < 3 }">{{ index + 1 }}</span>
-            <div class="rank-main">
-              <span class="rank-name">{{ item.roadName }}</span>
-              <span class="rank-meta">{{ item.vehicleCount }} 辆车</span>
-            </div>
-            <span
-              class="rank-badge"
-              :style="{
-                color: CITIZEN_CONGESTION_COLOR[item.congestionLevel] ?? '#64748b',
-                background: (CITIZEN_CONGESTION_COLOR[item.congestionLevel] ?? '#64748b') + '18',
-              }"
-            >
-              {{ item.congestionLabel }}
+      <!-- ============================ 列表视图 ============================ -->
+      <template v-else>
+        <section
+          class="c-card status-card"
+          :style="{ background: tone.bg, borderColor: tone.color + '33' }"
+        >
+          <span class="status-icon" :style="{ background: tone.color }">{{ tone.icon }}</span>
+          <div>
+            <h2 :style="{ color: tone.color }">{{ overview?.overallLabel }}</h2>
+            <p class="status-sub">
+              共 {{ overview?.eventTotal ?? 0 }} 条路况事件 · 更新于
+              {{ relativeTime(overview?.generatedAt) }}
+            </p>
+          </div>
+        </section>
+
+        <!-- 我所在的路段：列表视图里最高优先级 -->
+        <section v-if="route.currentRoad" class="c-card myroad">
+          <div class="myroad-head">
+            <span class="myroad-dot" :style="{ background: statusColor }" />
+            <strong>{{ route.currentRoad }}</strong>
+            <span v-if="currentStatus" class="myroad-status" :style="{ color: statusColor }">
+              {{ currentStatus.congestionLabel }}
             </span>
-          </li>
-        </ul>
-      </section>
+            <button
+              v-if="route.source === 'manual'"
+              class="myroad-reset"
+              @click="clearManual"
+            >
+              恢复自动
+            </button>
+          </div>
+          <p class="myroad-sub">
+            <template v-if="aheadEvents.length">
+              50 公里内 {{ aheadEvents.length }} 个事件<template v-if="aheadEvents[0]"
+                >，最近 {{ formatDistance(aheadEvents[0].distanceKm) }}</template
+              >
+            </template>
+            <template v-else>50 公里内暂无事件</template>
+          </p>
+          <p v-if="accuracyWarning" class="myroad-warn">{{ accuracyWarning }}</p>
+        </section>
 
-      <!-- 事件列表（仅列表模式；地图模式已在浮层内展示） -->
-      <section v-if="viewMode === 'list'" class="c-card">
-        <h3 class="c-section-title">最新路况事件</h3>
+        <!-- 定位引导：没定位时不空着，给一个明确的动作 -->
+        <section v-else class="c-card geo-card">
+          <strong>开启定位可查看前方路况</strong>
+          <p>{{ geoMessage || '授权后可自动判断你在哪条路段，并按距离列出前方事件' }}</p>
+          <div class="geo-actions">
+            <button class="c-btn" @click="startGeo">开启定位</button>
+            <button v-if="roads.length" class="c-btn" @click="viewMode = 'map'">
+              在地图上选择路段
+            </button>
+          </div>
+        </section>
 
-        <div v-if="!events.length" class="empty-inline">
-          当前没有需要提醒的路况事件
-        </div>
+        <!-- 本路段前方事件 -->
+        <section v-if="route.currentRoad" class="c-card">
+          <h3 class="c-section-title">本路段前方（50 公里内）</h3>
 
-        <ul v-else class="event-list">
-          <li v-for="(item, index) in events" :key="index" class="event-item">
-            <span
-              class="event-mark"
-              :style="{ background: CITIZEN_LEVEL_COLOR[item.level] ?? '#64748b' }"
-            />
-            <div class="event-body">
-              <div class="event-head">
-                <span class="event-type">{{ item.eventTypeLabel }}</span>
-                <span class="event-time">{{ relativeTime(item.createdAt) }}</span>
+          <div v-if="!aheadEvents.length" class="empty-inline">当前没有需要提醒的事件</div>
+
+          <ul v-else class="event-list">
+            <li v-for="(item, index) in aheadEvents" :key="index" class="event-item">
+              <span
+                class="event-mark"
+                :style="{ background: CITIZEN_LEVEL_COLOR[item.event.level] ?? '#64748b' }"
+              />
+              <div class="event-body">
+                <div class="event-head">
+                  <span class="event-type">{{ item.event.eventTypeLabel }}</span>
+                  <span class="event-dist">{{ formatDistance(item.distanceKm) }}</span>
+                </div>
+                <p v-if="item.event.description" class="event-desc">
+                  {{ item.event.description }}
+                </p>
               </div>
-              <p v-if="item.roadName" class="event-road">{{ item.roadName }}</p>
-              <p v-if="item.description" class="event-desc">{{ item.description }}</p>
+            </li>
+          </ul>
+
+          <!-- 已驶过的：不隐藏，掉头回来时有用 -->
+          <div v-if="passedEvents.length" class="passed-block">
+            <div class="passed-title">已在身后</div>
+            <ul class="event-list">
+              <li v-for="(item, index) in passedEvents" :key="index" class="event-item passed">
+                <span
+                  class="event-mark"
+                  :style="{ background: CITIZEN_LEVEL_COLOR[item.event.level] ?? '#64748b' }"
+                />
+                <div class="event-body">
+                  <div class="event-head">
+                    <span class="event-type">{{ item.event.eventTypeLabel }}</span>
+                    <span class="event-dist muted">{{ formatDistance(item.distanceKm) }}</span>
+                  </div>
+                  <p v-if="item.event.description" class="event-desc">
+                    {{ item.event.description }}
+                  </p>
+                </div>
+              </li>
+            </ul>
+          </div>
+
+          <!--
+            同路段但 50 公里以外。单独分区而不是混进"前方"：
+            一条高速绵延数百公里，把 200 公里外的事件写成"前方"
+            对驾驶决策是误导。
+          -->
+          <div v-if="farEvents.length" class="passed-block">
+            <div class="passed-title">同路段更远处（50 公里以外）</div>
+            <ul class="event-list">
+              <li v-for="(item, index) in farEvents" :key="index" class="event-item passed">
+                <span
+                  class="event-mark"
+                  :style="{ background: CITIZEN_LEVEL_COLOR[item.event.level] ?? '#64748b' }"
+                />
+                <div class="event-body">
+                  <div class="event-head">
+                    <span class="event-type">{{ item.event.eventTypeLabel }}</span>
+                    <span class="event-dist muted">{{ formatDistance(item.distanceKm) }}</span>
+                  </div>
+                  <p v-if="item.event.description" class="event-desc">
+                    {{ item.event.description }}
+                  </p>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <!--
+          其他路段。
+          分两个分支而不是在一个循环里做联合类型判断：有定位时元素是
+          `EventFix`（带距离），无定位时是裸 `PublicEvent`（只有时间）。
+          混在一个列表里写，模板会变成一堆 `'event' in item` 的丑陋判断，
+          而且类型保护也失效。
+        -->
+        <section class="c-card">
+          <h3 class="c-section-title">
+            {{ route.currentRoad ? '附近其他路段' : '全部路况事件' }}
+          </h3>
+
+          <div v-if="!events.length" class="empty-inline">当前没有需要提醒的路况事件</div>
+
+          <ul v-else-if="route.hasFix" class="event-list">
+            <li v-for="(item, index) in offRouteShown" :key="index" class="event-item">
+              <span
+                class="event-mark"
+                :style="{ background: CITIZEN_LEVEL_COLOR[item.event.level] ?? '#64748b' }"
+              />
+              <div class="event-body">
+                <div class="event-head">
+                  <span class="event-type">{{ item.event.eventTypeLabel }}</span>
+                  <span class="event-dist muted">{{ formatDistance(item.distanceKm) }}</span>
+                </div>
+                <p class="event-road">{{ item.event.roadName }}</p>
+              </div>
+            </li>
+          </ul>
+
+          <ul v-else class="event-list">
+            <li v-for="(item, index) in events.slice(0, 15)" :key="index" class="event-item">
+              <span
+                class="event-mark"
+                :style="{ background: CITIZEN_LEVEL_COLOR[item.level] ?? '#64748b' }"
+              />
+              <div class="event-body">
+                <div class="event-head">
+                  <span class="event-type">{{ item.eventTypeLabel }}</span>
+                  <span class="event-time">{{ relativeTime(item.createdAt) }}</span>
+                </div>
+                <p class="event-road">{{ item.roadName }}</p>
+              </div>
+            </li>
+          </ul>
+
+          <p v-if="route.unlocated.length" class="unlocated-note">
+            另有 {{ route.unlocated.length }} 条事件缺少坐标，无法参与距离排序
+          </p>
+        </section>
+
+        <section class="stat-row">
+          <div v-for="item in levelCards" :key="item.label" class="c-card stat">
+            <span class="stat-value" :style="{ color: item.color }">{{ item.value }}</span>
+            <span class="stat-label">{{ item.label }}</span>
+          </div>
+        </section>
+
+        <section class="c-card">
+          <h3 class="c-section-title">路段通行状况</h3>
+          <div class="congestion-row">
+            <div v-for="item in congestionCards" :key="item.label" class="congestion-item">
+              <span class="congestion-dot" :style="{ background: item.color }" />
+              <span class="congestion-value">{{ item.value }}</span>
+              <span class="congestion-label">{{ item.label }}</span>
             </div>
-          </li>
-        </ul>
-      </section>
+          </div>
+        </section>
+
+        <section v-if="rank.length" class="c-card">
+          <h3 class="c-section-title">车流最集中的路段</h3>
+          <ul class="rank-list">
+            <li v-for="(item, index) in rank" :key="index" class="rank-item">
+              <span class="rank-no" :class="{ top: index < 3 }">{{ index + 1 }}</span>
+              <div class="rank-main">
+                <span class="rank-name">{{ item.roadName }}</span>
+                <span class="rank-meta">{{ item.vehicleCount }} 辆车</span>
+              </div>
+              <span
+                class="rank-badge"
+                :style="{
+                  color: CITIZEN_CONGESTION_COLOR[item.congestionLevel] ?? '#64748b',
+                  background:
+                    (CITIZEN_CONGESTION_COLOR[item.congestionLevel] ?? '#64748b') + '18',
+                }"
+              >
+                {{ item.congestionLabel }}
+              </span>
+            </li>
+          </ul>
+        </section>
+      </template>
 
       <!-- 免责声明在两种视图下都保留：它是合规要求，不随展示形式变化 -->
       <p class="disclaimer">
-        以上信息来自高速监测点自动采集，可能存在延迟或误差。出行请以实际路况与交管部门发布为准。
+        以上信息来自高速监测点自动采集，可能存在延迟或误差。距离为直线估算，非沿路里程。出行请以实际路况与交管部门发布为准。
       </p>
     </template>
   </div>
@@ -297,6 +502,69 @@ onBeforeUnmount(() => {
   margin: 3px 0 0;
   font-size: 12px;
   color: var(--c-text-dim);
+}
+
+/* ------------------------------------------------------------ 我的路段卡 */
+
+.myroad {
+  border-left: 3px solid var(--c-primary);
+}
+.myroad-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.myroad-dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+.myroad-head strong {
+  font-size: 15px;
+  color: var(--c-text);
+}
+.myroad-status {
+  font-size: 12px;
+  font-weight: 600;
+}
+.myroad-reset {
+  margin-left: auto;
+  padding: 3px 9px;
+  border: 1px solid var(--c-border-strong);
+  border-radius: 8px;
+  background: none;
+  color: var(--c-text-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+.myroad-sub {
+  margin: 5px 0 0;
+  font-size: 12px;
+  color: var(--c-text-dim);
+}
+.myroad-warn {
+  margin: 5px 0 0;
+  font-size: 11px;
+  color: var(--c-warn);
+}
+
+/* ---------------------------------------------------------------- 定位卡 */
+
+.geo-card strong {
+  display: block;
+  font-size: 14px;
+  color: var(--c-text);
+}
+.geo-card p {
+  margin: 4px 0 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--c-text-dim);
+}
+.geo-actions {
+  display: flex;
+  gap: 8px;
 }
 
 /* ---------------------------------------------------------------- 数字统计 */
@@ -419,6 +687,10 @@ onBeforeUnmount(() => {
 .event-item:last-child {
   border-bottom: none;
 }
+/* 已驶过的降不透明度，但仍可读 —— 不是禁用状态 */
+.event-item.passed {
+  opacity: 0.62;
+}
 .event-mark {
   flex: 0 0 auto;
   width: 3px;
@@ -443,6 +715,17 @@ onBeforeUnmount(() => {
   color: var(--c-text-faint);
   white-space: nowrap;
 }
+.event-dist {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--c-primary);
+  white-space: nowrap;
+}
+.event-dist.muted {
+  color: var(--c-text-dim);
+  font-weight: 400;
+}
 .event-road {
   margin: 2px 0 0;
   font-size: 12px;
@@ -455,10 +738,27 @@ onBeforeUnmount(() => {
   line-height: 1.5;
 }
 
+.passed-block {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--c-border-strong);
+}
+.passed-title {
+  margin-bottom: 2px;
+  font-size: 11px;
+  color: var(--c-text-faint);
+}
+
 .empty-inline {
   padding: 18px 0;
   text-align: center;
   font-size: 13px;
+  color: var(--c-text-faint);
+}
+
+.unlocated-note {
+  margin: 10px 0 0;
+  font-size: 11px;
   color: var(--c-text-faint);
 }
 
@@ -470,7 +770,7 @@ onBeforeUnmount(() => {
   text-align: center;
 }
 
-/* -------------------------------------------------------- 列表/地图切换 */
+/* -------------------------------------------------------- 视图切换 */
 
 .view-switch {
   display: flex;
@@ -491,7 +791,6 @@ onBeforeUnmount(() => {
   font-size: 13px;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
-  /* 移动端点按目标高度 */
   min-height: 38px;
 }
 .switch-btn.active {
@@ -508,6 +807,7 @@ onBeforeUnmount(() => {
   color: var(--c-text);
   font-size: 13px;
   cursor: pointer;
+  min-height: 36px;
 }
 
 @media (min-width: 640px) {
