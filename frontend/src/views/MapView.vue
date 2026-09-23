@@ -37,7 +37,18 @@ const { create, destroy, toggleTraffic, map: amap, AMap, loading: amapLoading, e
 const network = ref<RoadNetwork | null>(null)
 const selected = ref<{ title: string; lines: string[] } | null>(null)
 
-const showRoads = ref(true)
+/**
+ * 路网线段默认**不显示**。
+ *
+ * `road_network` 里每个路段的 `polyline` 只有起点与终点两个点，画出来是直线 ——
+ * 延安高架西段从 [121.32, 31.197] 直连 [121.448, 31.225]，会横穿市区，
+ * 与真实高架走向完全不符。这种线不只是多余，而是**误导**：
+ * 看上去像有一条路从市区直接穿过去，且与底图自带的路况线缠在一起分不清。
+ *
+ * 保留绘制而不删掉：等路网数据补上真实路径点后，勾选即可正常显示，
+ * 不必再改代码。
+ */
+const showRoads = ref(false)
 const showCameras = ref(true)
 const showEvents = ref(true)
 const showTraffic = ref(true)
@@ -247,9 +258,9 @@ onBeforeUnmount(() => {
     <!-- 控制栏 -->
     <section class="panel controls">
       <div class="chips">
-        <label class="chip">
+        <label class="chip" title="路段折线目前只有起终点，显示为直线而非真实路形">
           <input v-model="showRoads" type="checkbox" @change="redrawAll" />
-          上海路网
+          上海路网（示意线）
         </label>
         <label class="chip">
           <input v-model="showCameras" type="checkbox" @change="redrawAll" />
