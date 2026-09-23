@@ -706,6 +706,21 @@ class CitizenReportReviewRequest(CamelModel):
     level: str = ''
 
 
+class CitizenReportArchiveRequest(CamelModel):
+    """民众上报的归档请求。
+
+    归档是**软删除**，不是物理删除 —— 原因（关联事件、照片文件、频率额度、
+    追溯）见 `citizen_report_service.archive_report` 的注释。
+
+    ``operator`` **不是权威来源**：接口以会话里的警号为准，这个字段只在
+    没有会话的场景（离线脚本）下兜底。``reason`` 选填，且**不会返回给民众** ——
+    那是内部管理说明，民众只看得到状态标签。
+    """
+
+    operator: str = ''
+    reason: str = ''
+
+
 class AlertEvidence(CamelModel):
     """违停告警中的单条判据。结构与事故识别、派警的证据链一致。"""
 

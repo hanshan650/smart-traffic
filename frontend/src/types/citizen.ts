@@ -149,6 +149,10 @@ export interface InternalCitizenReport extends CitizenReport {
   level: string
   reviewedBy: string
   eventId: string
+  /** 归档（软删除）留痕。归档理由不会返回给民众，所以只在内部类型里 */
+  archivedBy: string
+  archivedAt?: string | null
+  archiveReason: string
 }
 
 export interface CitizenReportCreateResponse {
