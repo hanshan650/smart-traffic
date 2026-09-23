@@ -118,39 +118,37 @@ const activeName = computed(() => route.name as string)
   --c-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 6px 18px rgba(15, 23, 42, 0.05);
 
   /*
-    字号阶梯
-    ========
-    民众端是移动优先设计的，字号按手机定（11～17px）。但用户也可能在
-    桌面宽屏上打开 —— 视口宽度可能是手机的 2～3 倍，而固定 px 字号
-    不会跟着变，结果是一大片界面配着手机尺寸的小字，读起来很吃力。
+    字号阶梯：随视口**连续缩放**，不用断点跳档
+    ==========================================
+    民众端从手机到桌面要都能用，而固定 px 会在宽屏上显得很小；
+    换成一档档的断点又会在大屏边界处突变（跨过 768px 时全页文字突然
+    跳一截），而中问尺寸（平板竖屏、分屏窗口）又只能二选一。
 
-    统一走变量、按视口宽度整档调整，而不是让每个组件自己写一遍媒体查询：
-    后者迟早会出现"某个卡片还是手机字号"的不一致。
-
-    取值参考：桌面浏览器正文不小于 16px，次要信息不小于 13px，
-    说明性文字（口径、图注）可以到 12px —— 再小在 1080p 上就费眼了。
+    锚点：390px 视口应得手机尺寸，1440px 应得桌面尺寸，
+    中间线性插值，两端用 clamp 夹住不上不下。
+    斜率用 vw，所以浏览器缩放、设备旋转都会自动跟上。
   */
-  --fs-xs: 10px;   /* 口径说明、图注 */
-  --fs-sm: 11px;   /* 次要信息：时间、元数据 */
-  --fs-base: 12px; /* 正文 */
-  --fs-md: 14px;   /* 小标题、重点值 */
-  --fs-lg: 16px;   /* 主标题 */
-  --fs-xl: 22px;   /* 大号数字 */
+  --fs-xs: clamp(10px, 0.3vw + 8.9px, 13px); /* 口径说明、图注 */
+  --fs-sm: clamp(11px, 0.35vw + 9.7px, 14px); /* 次要信息：时间、元数据 */
+  --fs-base: clamp(12px, 0.4vw + 10.5px, 16px); /* 正文 */
+  --fs-md: clamp(14px, 0.5vw + 12px, 18px); /* 小标题、重点值 */
+  --fs-lg: clamp(16px, 0.6vw + 13.6px, 21px); /* 主标题 */
+  --fs-xl: clamp(22px, 1.1vw + 18px, 34px); /* 大号数字 */
   /*
-    输入框专用。**任何断点下都不得低于 16px**：
+    输入框专用。**任何视口下都不得低于 16px**：
     iOS Safari 在字号小于 16px 的输入框获得焦点时会自动放大整个页面，
-    且不会自动缩回。所以它不能跟着 --fs-md 走（线上在窄屏是 15px）。
+    且不会自动缩回。所以它不能跟着 --fs-md 走（那在窄屏只有 14px）。
     宁可输入框比其他文字大一点，也不能让用户每次点输入框都得双指缩回来。
   */
-  --fs-input: 16px;
+  --fs-input: clamp(16px, 0.3vw + 14.9px, 18px);
 
   /*
-    地图标记的尺寸也跟着字号走。
+    地图标记尺寸跟着字号走。
     必须单独给变量：标记的 HTML 是高德插入的，只能走内联样式，
     用不了 var() —— 由 RouteMap 在绘制时读取这两个值再拼进 HTML。
   */
-  --pin-size: 26px;
-  --pin-font: 13px;
+  --pin-size: clamp(26px, 0.8vw + 22.8px, 32px);
+  --pin-font: calc(var(--pin-size) / 2);
 
   min-height: 100vh;
   background: var(--c-bg);
@@ -194,30 +192,7 @@ const activeName = computed(() => route.name as string)
 
 @media (min-width: 768px) {
   .citizen-shell {
-    --fs-xs: 13px;
-    --fs-sm: 14px;
-    --fs-base: 15px;
-    --fs-md: 17px;
-    --fs-lg: 19px;
-    --fs-xl: 30px;
-    --pin-size: 30px;
-    --pin-font: 15px;
-    --fs-input: 17px;
     padding-bottom: 0;
-  }
-}
-
-@media (min-width: 1200px) {
-  .citizen-shell {
-    --fs-xs: 14px;
-    --fs-sm: 15px;
-    --fs-base: 16px;
-    --fs-md: 18px;
-    --fs-lg: 21px;
-    --fs-xl: 34px;
-    --pin-size: 32px;
-    --pin-font: 16px;
-    --fs-input: 18px;
   }
 }
 
@@ -231,25 +206,26 @@ const activeName = computed(() => route.name as string)
   border-bottom: 1px solid var(--c-border);
 }
 .c-header-inner {
-  max-width: 980px;
+  max-width: 1080px;
   margin: 0 auto;
-  padding: 10px 16px;
+  padding: clamp(8px, 0.45vw + 6px, 14px) clamp(12px, 0.9vw + 8px, 24px);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: clamp(10px, 1.2vw + 5px, 20px);
 }
 .c-brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: clamp(7px, 0.5vw + 5px, 11px);
 }
 .c-logo {
-  width: 34px;
-  height: 34px;
+  flex: 0 0 auto;
+  width: clamp(30px, 1.5vw + 24px, 40px);
+  height: clamp(30px, 1.5vw + 24px, 40px);
   display: grid;
   place-items: center;
-  border-radius: 10px;
+  border-radius: clamp(8px, 0.5vw + 6px, 12px);
   background: var(--c-primary);
   color: #fff;
   font-weight: 700;
@@ -299,9 +275,10 @@ const activeName = computed(() => route.name as string)
   */
   min-height: 0;
   width: 100%;
-  max-width: 980px;
+  max-width: 1080px;
   margin: 0 auto;
-  padding: 14px 16px 24px;
+  padding: clamp(8px, 0.5vw + 6px, 18px) clamp(10px, 0.7vw + 7px, 20px)
+    clamp(10px, 0.7vw + 7px, 24px);
   /* 整页不滚，滚动发生在这里 */
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -375,7 +352,6 @@ const activeName = computed(() => route.name as string)
 }
 
 /* ------------------------------------------------------------------ 桌面 */
-
 @media (min-width: 768px) {
   .citizen-shell {
     padding-bottom: 0;
@@ -386,9 +362,7 @@ const activeName = computed(() => route.name as string)
   .c-tabbar {
     display: none;
   }
-  .c-main {
-    padding: 22px 16px 32px;
-  }
+  /* .c-main 的内边距已由 clamp 接管，不再需要断点覆盖 */
 }
 
 /*

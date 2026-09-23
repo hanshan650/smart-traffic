@@ -439,7 +439,7 @@ function clearManual(): void {
 .home {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: clamp(8px, 0.5vw + 6px, 12px);
 }
 
 /*
@@ -795,15 +795,15 @@ function clearManual(): void {
 .view-switch {
   display: flex;
   gap: 4px;
-  padding: 3px;
-  border-radius: 11px;
+  padding: clamp(2px, 0.25vw + 1.5px, 4px);
+  border-radius: clamp(9px, 0.4vw + 7.4px, 12px);
   background: var(--c-surface);
   border: 1px solid var(--c-border);
   box-shadow: var(--c-shadow);
 }
 .switch-btn {
   flex: 1;
-  padding: 8px;
+  padding: clamp(5px, 0.3vw + 3.8px, 8px);
   border: none;
   border-radius: 8px;
   background: none;
@@ -811,19 +811,8 @@ function clearManual(): void {
   font-size: var(--fs-base);
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
-  min-height: 38px;
-}
-
-@media (max-width: 767px) {
-  /* 手机端把切换条压到最矮：它只是入口，不该跟地图抢纵向空间 */
-  .view-switch {
-    padding: 2px;
-    border-radius: 9px;
-  }
-  .switch-btn {
-    padding: 5px;
-    min-height: 30px;
-  }
+  /* 手机够矮、桌面手点得中，中间连续过渡 */
+  min-height: clamp(30px, 1vw + 26px, 42px);
 }
 .switch-btn.active {
   background: var(--c-primary-soft);
@@ -832,14 +821,14 @@ function clearManual(): void {
 }
 
 .c-btn {
-  padding: 7px 16px;
+  padding: clamp(6px, 0.3vw + 4.8px, 9px) clamp(13px, 0.8vw + 10px, 18px);
   border: 1px solid var(--c-border-strong);
   border-radius: 9px;
   background: var(--c-surface);
   color: var(--c-text);
   font-size: var(--fs-base);
   cursor: pointer;
-  min-height: 36px;
+  min-height: clamp(32px, 0.6vw + 29.6px, 38px);
 }
 
 @media (min-width: 640px) {
