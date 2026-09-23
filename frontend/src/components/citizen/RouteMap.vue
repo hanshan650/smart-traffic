@@ -27,6 +27,7 @@ import { AMAP_STYLE_LIGHT, useAmap } from '@/composables/useAmap'
 import { useSystemStore } from '@/stores/system'
 import { CITIZEN_CONGESTION_COLOR, CITIZEN_LEVEL_COLOR } from '@/types/citizen'
 import { formatDistance } from '@/utils/geo'
+import { hasPoint } from '@/utils/route'
 import { relativeTime } from '@/utils/time'
 import type { GeoFix, GeoState } from '@/composables/useGeolocation'
 import type { PublicEvent, CongestionRankItem } from '@/types/citizen'
@@ -101,10 +102,69 @@ const aheadList = computed(() => props.route.ahead)
 /** 无坐标事件的数量，用于给出"有几条没显示在地图上"的说明 */
 const unlocatedCount = computed(() => props.route.unlocated.length)
 
-const DEFAULT_CENTER: [number, number] = [113.6, 34.0]
-const DEFAULT_ZOOM = 7
-/** 有定位时的缩放级别：街道级，能看清路口与前后路段 */
-const TRACKING_ZOOM = 14
+/**
+ * 街道级缩放。既是初始视野，也是地图缩放的**下限**。
+ *
+ * 为什么需要一个下滑：初始化后的视野会直接呈现在用户眼前，从省级（7）起步
+ * 即便随后会被 `setFitView` 调整，中间那几帧"一大片无关区域"
+ * 也足以让人以为地图加载错了地方。
+ *
+ * 为什么它同时是下限：`setFitView` 的目标是"容纳全部点位"，
+ * 远端点位一多就会退到市区级（实测 6 个跨 4 km 的点位会退到 14，
+ * 加入"同路段更远处"的点位会退到 12）—— 地图上只剩几条主干道，
+ * 恰好把用户最需要的那部分细节丢掉。缩得比街道级更远时拉回来：
+ * 屏幕外的远端点位由下方列表承担，不拿地图细节去换"看得全"。
+ *
+ * 注意这与警务端相反：那边要"看全所有点位"，所以不能设下限。
+ */
+const STREET_ZOOM = 15
+
+/**
+ * 有定位时的缩放级别：**导航级**。
+ *
+ * 比街道级再近一档：本页回答的是"我在哪条路、前方哪个路口有情况"。
+ * 16 下一屏约 600~800 m，能看到路口与前后路段 —— 这才是行进视角。
+ */
+const TRACKING_ZOOM = 16
+
+/** 中位数。用中位数而非平均值：平均值会被少数极远的点位拉偏 */
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+}
+
+/**
+ * 所有带坐标的事件，按"前方 → 已在身后 → 同路段更远处 → 其他路段"排列。
+ *
+ * `unlocated` 刻意不参与 —— 它们本来就没有坐标。
+ */
+const pointEvents = computed(() =>
+  [
+    ...props.route.ahead,
+    ...props.route.passed,
+    ...props.route.far,
+    ...props.route.offRoute,
+  ]
+    .map((item) => item.event)
+    .filter(hasPoint),
+)
+
+/**
+ * 视野中心：所有点位坐标的中位数。
+ *
+ * 这里曾直接传河南（视频源所在地）—— 而民众端的路况数据在上海，
+ * 结果地图会先在河南渲染一帧，再飞到上海，明显一跳。
+ * 没有点位时返回 undefined，交给 `useAmap` 用运行时配置里的上海中心兜底。
+ */
+const dataCenter = computed<[number, number] | undefined>(() => {
+  const points = pointEvents.value
+  if (!points.length) return undefined
+  return [
+    median(points.map((item) => item.longitude)),
+    median(points.map((item) => item.latitude)),
+  ]
+})
 
 function clearOverlays(): void {
   if (amap.value && overlays.value.length) {
@@ -359,8 +419,16 @@ function centerOnUser(animate = true): void {
 let fittedOnce = false
 function fitAll(): void {
   if (!amap.value || fittedOnce) return
-  if (!overlays.value.length) return
-  amap.value.setFitView(overlays.value, false, [70, 70, 70, 70])
+  const center = dataCenter.value
+  if (!center) return
+
+  // 不用 `setFitView`：它的目标是"容纳全部点位"，必然向"看得全"妥协
+  // （实测 6 个跨 4 km 的点位会退到 zoom 14，加入"更远处"的点位会退到 12）。
+  // 它也没有"不要缩得比 X 更远"的参数，第四个 maxZoom 管的是**放大上限**。
+  //
+  // 这一页要的是街道级细节，所以直接定中心 + 固定缩放；
+  // 装不下的远端点位交给下方列表，不拿地图细节去换"看得全"。
+  amap.value.setZoomAndCenter(STREET_ZOOM, center)
   fittedOnce = true
 }
 
@@ -398,8 +466,8 @@ onMounted(async () => {
 
   await create({
     container: containerId,
-    center: DEFAULT_CENTER,
-    zoom: DEFAULT_ZOOM,
+    center: dataCenter.value,
+    zoom: STREET_ZOOM,
     mapStyle: AMAP_STYLE_LIGHT,
     showTraffic: true,
   })
