@@ -14,6 +14,50 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/ScreenView.vue'),
     meta: { title: '指挥大屏', fullscreen: true },
   },
+  // ------------------------------------------------------------------------
+  // 民众端
+  // ------------------------------------------------------------------------
+  // 与警务端**完全分离的一棵路由树**，使用独立的 CitizenLayout（亮色、
+  // 移动优先、底部 Tab）。两者共用同一个构建产物，但视觉与导航各自独立。
+  {
+    path: '/citizen',
+    component: () => import('@/layouts/CitizenLayout.vue'),
+    children: [
+      {
+        path: '',
+        name: 'citizen-home',
+        component: () => import('@/views/citizen/CitizenHomeView.vue'),
+        meta: { title: '路况' },
+      },
+      {
+        path: 'report',
+        name: 'citizen-report',
+        component: () => import('@/views/citizen/CitizenReportView.vue'),
+        meta: { title: '上报' },
+      },
+      {
+        path: 'track',
+        name: 'citizen-track',
+        component: () => import('@/views/citizen/CitizenTrackView.vue'),
+        meta: { title: '进度' },
+      },
+      {
+        path: 'advice',
+        name: 'citizen-advice',
+        component: () => import('@/views/citizen/CitizenAdviceView.vue'),
+        meta: { title: '建议' },
+      },
+      {
+        path: 'help',
+        name: 'citizen-help',
+        component: () => import('@/views/citizen/CitizenHelpView.vue'),
+        meta: { title: '安全' },
+      },
+    ],
+  },
+  // ------------------------------------------------------------------------
+  // 警务端
+  // ------------------------------------------------------------------------
   {
     path: '/',
     component: () => import('@/layouts/MainLayout.vue'),
@@ -72,6 +116,12 @@ const routes: RouteRecordRaw[] = [
         name: 'surveillance',
         component: () => import('@/views/SurveillanceView.vue'),
         meta: { title: '违停监控', icon: '⊙' },
+      },
+      {
+        path: 'reports',
+        name: 'reports',
+        component: () => import('@/views/ReportsView.vue'),
+        meta: { title: '民众上报', icon: '✉' },
       },
       {
         path: 'system',

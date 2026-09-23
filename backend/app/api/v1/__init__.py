@@ -7,6 +7,8 @@ from app.api.v1 import (
     events,
     incidents,
     officers,
+    public,
+    reports,
     roads,
     surveillance,
     system,
@@ -23,3 +25,5 @@ api_router.include_router(roads.router)
 api_router.include_router(officers.router)
 api_router.include_router(incidents.router)
 api_router.include_router(surveillance.router)
+api_router.include_router(reports.router)
+api_router.include_router(public.router)

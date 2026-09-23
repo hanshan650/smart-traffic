@@ -101,6 +101,18 @@ def ensure_indexes() -> List[str]:
     audits.create_index([('operator', ASCENDING)], name='idx_audit_operator')
     created.append('owner_query_audits(at, plate, operator)')
 
+    # 民众上报。report_no 是民众查询进度的凭据，必须唯一
+    citizen = db['citizen_reports']
+    citizen.create_index([('report_no', ASCENDING)], name='idx_report_no', unique=True)
+    citizen.create_index([('status', ASCENDING)], name='idx_report_status')
+    citizen.create_index([('created_at', DESCENDING)], name='idx_report_created')
+    # 频率限制按 client_key + 时间统计，需要联合索引
+    citizen.create_index(
+        [('client_key', ASCENDING), ('created_at', DESCENDING)],
+        name='idx_report_client',
+    )
+    created.append('citizen_reports(report_no unique, status, created_at, client+created_at)')
+
     return created
 
 

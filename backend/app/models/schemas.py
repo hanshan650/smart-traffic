@@ -678,6 +678,24 @@ class PlateEstimateRequest(CamelModel):
     frame_height: int = 288
 
 
+# ==========================================================================
+# 民众上报
+# ==========================================================================
+
+class CitizenReportReviewRequest(CamelModel):
+    """民众上报的复核请求。
+
+    ``reviewer`` 必填 —— 复核意味着一次人工判断，必须能追溯到人。
+    缺少时服务层会直接拒绝。
+    """
+
+    action: str = Field(description='approve | reject | duplicate')
+    reviewer: str
+    note: str = ''
+    #: 仅 approve 时有意义，可覆盖上报的默认紧急级别
+    level: str = ''
+
+
 class AlertEvidence(CamelModel):
     """违停告警中的单条判据。结构与事故识别、派警的证据链一致。"""
 
