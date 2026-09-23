@@ -21,6 +21,8 @@ import { citizenReportApi } from '@/api/citizen'
 import { describeError } from '@/api/client'
 import { REPORT_STATUS_COLOR } from '@/types/citizen'
 import { formatServerTime } from '@/utils/time'
+import { forgetReport, loadMyReports, updateMyReport } from '@/utils/myReports'
+import type { MyReportEntry } from '@/utils/myReports'
 import type { CitizenReport } from '@/types/citizen'
 
 const route = useRoute()
@@ -44,18 +46,83 @@ const statusColor = computed(() =>
   report.value ? (REPORT_STATUS_COLOR[report.value.status] ?? '#64748b') : '#64748b',
 )
 
-async function search(): Promise<void> {
-  const value = reportNo.value.trim()
+function statusColorOf(status: string): string {
+  return REPORT_STATUS_COLOR[status] ?? '#64748b'
+}
+
+// ==========================================================================
+// 我的上报（本机记录）
+// ==========================================================================
+
+const entries = ref<MyReportEntry[]>([])
+const refreshing = ref(false)
+
+/** 进页面时最多刷新几条。更早的记录按需再查，不一次把请求打满 */
+const REFRESH_MAX = 10
+/** 并发上限：移动网络下同时开太多连接反而更慢 */
+const REFRESH_CONCURRENCY = 4
+
+/**
+ * 批量刷新本机记录的状态。
+ *
+ * 用 `allSettled` 而非 `all`：某一条查不到（编号失效、服务端已清理）
+ * 不该让整批刷新失败 —— 其余几条的状态仍然是有效的。
+ */
+async function refreshStatuses(): Promise<void> {
+  if (!entries.value.length) return
+  refreshing.value = true
+  try {
+    const targets = entries.value.slice(0, REFRESH_MAX)
+    for (let i = 0; i < targets.length; i += REFRESH_CONCURRENCY) {
+      const batch = targets.slice(i, i + REFRESH_CONCURRENCY)
+      await Promise.allSettled(
+        batch.map(async (item) => {
+          const result = await citizenReportApi.track(item.reportNo)
+          updateMyReport(item.reportNo, {
+            status: result.report.status,
+            statusLabel: result.report.statusLabel,
+            reportTypeLabel: result.report.reportTypeLabel,
+            roadName: result.report.roadName,
+          })
+        }),
+      )
+      // 每批回来就更新一次，用户能边看边刷新，不用等全部跑完
+      entries.value = loadMyReports()
+    }
+  } finally {
+    refreshing.value = false
+  }
+}
+
+/** 从本机列表移除。只删本地记录，服务端的数据不动 */
+function removeEntry(no: string, event: Event): void {
+  // 整行是可点的，别让"移除"顺带触发一次查询
+  event.stopPropagation()
+  forgetReport(no)
+  entries.value = loadMyReports()
+  if (report.value?.reportNo === no) report.value = null
+}
+
+async function search(preset?: string): Promise<void> {
+  const value = (preset ?? reportNo.value).trim()
   if (!value) {
     error.value = '请输入上报编号'
     return
   }
+  // 从列表点进来时把编号回填到输入框，用户能看清查的是哪一条
+  reportNo.value = value
   loading.value = true
   error.value = ''
   report.value = null
   try {
     const result = await citizenReportApi.track(value)
     report.value = result.report
+    // 顺手同步到本机列表，免得列表上还挂着旧的提交态
+    updateMyReport(value, {
+      status: result.report.status,
+      statusLabel: result.report.statusLabel,
+    })
+    entries.value = loadMyReports()
   } catch (err) {
     error.value = describeError(err).message
   } finally {
@@ -64,16 +131,71 @@ async function search(): Promise<void> {
 }
 
 onMounted(() => {
+  entries.value = loadMyReports()
+  void refreshStatuses()
+
   const fromQuery = route.query.no
   if (typeof fromQuery === 'string' && fromQuery) {
     reportNo.value = fromQuery
-    void search()
+    void search(fromQuery)
   }
 })
 </script>
 
 <template>
   <div class="track">
+    <!--
+      本机记录放最前面：用户进这一页十次有九次是想看"我报的那条怎么样了"，
+      而不是想再输一遍编号。没有记录时整块不出现，界面回到最朴素的样子。
+    -->
+    <section v-if="entries.length" class="c-card">
+      <div class="mine-head">
+        <h3 class="mine-title">
+          我的上报
+          <span class="mine-count">{{ entries.length }}</span>
+        </h3>
+        <span v-if="refreshing" class="mine-refreshing">更新中…</span>
+      </div>
+
+      <ul class="mine-list">
+        <li
+          v-for="item in entries"
+          :key="item.reportNo"
+          class="mine-item"
+          @click="search(item.reportNo)"
+        >
+          <div class="mine-row">
+            <span class="mine-no">{{ item.reportNo }}</span>
+            <span
+              class="mine-status"
+              :style="{
+                color: statusColorOf(item.status),
+                background: statusColorOf(item.status) + '18',
+              }"
+            >
+              {{ item.statusLabel || '状态未知' }}
+            </span>
+          </div>
+          <div class="mine-row mine-meta">
+            <span>{{ item.reportTypeLabel || '未分类' }}</span>
+            <span v-if="item.roadName" class="mine-road">{{ item.roadName }}</span>
+            <span class="mine-time">{{ formatServerTime(item.createdAt) }}</span>
+          </div>
+          <button
+            class="mine-remove"
+            title="从本机移除（不影响已提交的上报）"
+            @click="removeEntry(item.reportNo, $event)"
+          >
+            ✕
+          </button>
+        </li>
+      </ul>
+
+      <p class="mine-note">
+        记录保存在本机浏览器中，清除浏览器数据后会丢失；凭编号仍可随时查询。
+      </p>
+    </section>
+
     <section class="c-card">
       <h2 class="c-title">查上报进度</h2>
       <p class="c-sub">输入提交时拿到的上报编号（形如 MZ202609230001）。</p>
@@ -83,9 +205,9 @@ onMounted(() => {
           v-model="reportNo"
           class="c-input"
           placeholder="MZ..."
-          @keyup.enter="search"
+          @keyup.enter="search()"
         />
-        <button class="c-btn primary" :disabled="loading" @click="search">
+        <button class="c-btn primary" :disabled="loading" @click="search()">
           {{ loading ? '查询中…' : '查询' }}
         </button>
       </div>
@@ -144,7 +266,9 @@ onMounted(() => {
     </template>
 
     <p class="hint">
-      找不到记录？请确认编号是否完整。编号区分大小写，且需与提交时返回的一致。
+      提交过的上报会自动记录在本机，下次进入本页即可看到。
+      <br />
+      编号区分大小写，需与提交时返回的一致。
     </p>
   </div>
 </template>
@@ -350,6 +474,119 @@ onMounted(() => {
   font-size: var(--fs-xs);
   color: var(--c-text-faint);
   text-align: center;
+  line-height: 1.6;
+}
+
+/* ---------------------------------------------------------------- 我的上报 */
+
+.mine-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.mine-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+.mine-count {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-border);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--c-text-dim);
+}
+.mine-refreshing {
+  font-size: var(--fs-xs);
+  color: var(--c-text-faint);
+}
+
+.mine-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mine-item {
+  position: relative;
+  /* 右边让出位置，避免编号/徒章钻到右上角的"移除"下面 */
+  padding: 10px 40px 10px 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  background: var(--c-surface-2);
+  cursor: pointer;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+.mine-item:active {
+  border-color: var(--c-border-strong);
+}
+.mine-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.mine-no {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+.mine-status {
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+.mine-meta {
+  margin-top: 5px;
+  font-size: var(--fs-xs);
+  color: var(--c-text-faint);
+}
+.mine-road {
+  color: var(--c-text-dim);
+}
+.mine-time {
+  margin-left: auto;
+}
+.mine-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  /* 视觉 16px、热区 32px：用盒子撑开而不把图标画大 */
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--c-text-faint);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.mine-remove:hover {
+  background: var(--c-surface);
+  color: var(--c-danger);
+}
+
+.mine-note {
+  margin: 11px 0 0;
+  font-size: var(--fs-xs);
+  color: var(--c-text-faint);
   line-height: 1.6;
 }
 
