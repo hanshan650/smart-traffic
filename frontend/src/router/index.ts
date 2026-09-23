@@ -139,11 +139,22 @@ const router = createRouter({
   routes,
 })
 
+/**
+ * 按所在端设置页面标题。
+ *
+ * 民众端与警务端共用一份 `index.html`，标题不能写死在 HTML 里 ——
+ * 那样刷新时总会闪一下另一端的名称。这里按路由前缀区分，
+ * 顺带把两端的产品名也区分开：普通用户看到的应该是"出行助手"，
+ * 而值班员看到的是"监测平台"。
+ */
 router.afterEach((to) => {
-  const title = (to.meta.title as string | undefined) ?? ''
-  document.title = title
-    ? `${title} · 智能交通监测平台`
-    : '智能交通监测与事故预警平台'
+  const pageTitle = (to.meta.title as string) ?? ''
+  if (!pageTitle) return
+
+  const isCitizen = to.path.startsWith('/citizen')
+  const siteName = isCitizen ? '高速出行助手' : '智能交通监测平台'
+
+  document.title = `${pageTitle} · ${siteName}`
 })
 
 export default router

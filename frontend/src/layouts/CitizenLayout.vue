@@ -19,6 +19,8 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 
+import PwaPrompt from '@/components/PwaPrompt.vue'
+
 const route = useRoute()
 
 const navItems = [
@@ -83,6 +85,13 @@ const activeName = computed(() => route.name as string)
         <span class="c-tab-label">{{ item.label }}</span>
       </RouterLink>
     </nav>
+
+    <!--
+      PWA 提示：安装引导 + 新版本 + 离线。
+      只有民众端带安装引导 —— 警务端是内部系统，值班员用书签就够了，
+      而且 manifest 的 start_url 指向民众端，装出来的图标本就是民众端。
+    -->
+    <PwaPrompt citizen />
   </div>
 </template>
 

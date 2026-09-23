@@ -2,8 +2,31 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="基于 YOLOv8 的城市道路监控与交通事件预警平台" />
+    <!--
+      viewport-fit=cover 让页面延伸到 iPhone 的刘海/圆角区域，
+      配合各处的 env(safe-area-inset-*) 使用。不加这一项时，
+      底部 Tab 会被 Home Indicator 压住。
+
+      刻意**不设** user-scalable=no：禁用缩放会挡住视力不佳的用户
+      放大文字，可访问性代价大于"避免误双击缩放"这点收益。
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="高速路况实时查询与路况事件上报，支持众包上报与处理进度查询" />
+
+    <!-- 地址栏与状态栏配色（移动端浏览器） -->
+    <meta name="theme-color" content="#1d4ed8" />
+    <!-- iOS 添加到主屏后的表现：全屏、状态栏 -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="出行助手" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
+
+    <!--
+      这里的标题是**通用兜底值**：民众端与警务端共用同一份 index.html，
+      实际标题由路由守卫按所在端设置（见 router/index.ts）。
+      写上某一端的专属名称，另一端刷新时就会闪一下错误的标题。
+    -->
     <title>智能交通监测与事故预警平台</title>
   </head>
   <body>

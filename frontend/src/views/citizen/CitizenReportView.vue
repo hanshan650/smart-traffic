@@ -380,9 +380,13 @@ function goTrack(): void {
   border-radius: 10px;
   background: var(--c-surface);
   color: var(--c-text);
-  font-size: 14px;
+  /*
+    必须 ≥ 16px：iOS Safari 在字号小于 16px 的输入框获得焦点时，
+    会自动放大整个页面且不会自动缩回，用户得手动双指缩回来。
+    不能改用 user-scalable=no 规避 —— 那会挡住需要放大文字的用户。
+  */
+  font-size: 16px;
   font-family: inherit;
-  /* iOS 上字号小于 16px 会在聚焦时自动放大页面，这里用 touch-action 规避布局跳动 */
   resize: vertical;
   box-sizing: border-box;
 }
