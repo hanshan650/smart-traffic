@@ -25,9 +25,15 @@ const systemStore = useSystemStore()
 const videoStore = useVideoStore()
 const eventStore = useEventStore()
 
-const { create, destroy, toggleTraffic, loading: amapLoading, error: amapError } = useAmap()
-
-const amap = ref<any>(null)
+// 注意区分两个对象：
+//   · `amap` 是 Map **实例**，用于 add / remove / setZoomAndCenter
+//   · `AMap` 是 API **命名空间**，用于 new Polyline / new CircleMarker / new LngLat
+//
+// 曾经误用 `new amap.value.CircleMarker(...)` —— Map 实例上并没有这些
+// 构造函数，会抛 “is not a constructor”。这个错误长期未暴露，因为
+// 事件与摄像头图层都依赖 `videoStore.cameras`，而它常因上游不可用而为空，
+// 循环体从未真正执行到。
+const { create, destroy, toggleTraffic, map: amap, AMap, loading: amapLoading, error: amapError } = useAmap()
 const network = ref<RoadNetwork | null>(null)
 const selected = ref<{ title: string; lines: string[] } | null>(null)
 
@@ -57,7 +63,7 @@ function drawRoads(): void {
 
   network.value.roads.forEach((road) => {
     const color = CONGESTION_COLOR[road.congestionLevel]
-    const line = new amap.value.Polyline({
+    const line = new AMap.value.Polyline({
       path: road.polyline,
       strokeColor: color,
       strokeWeight: 7,
@@ -92,7 +98,7 @@ function drawCameras(): void {
   videoStore.cameras.forEach((cam) => {
     if (!cam.longitude || !cam.latitude) return
 
-    const marker = new amap.value.CircleMarker({
+    const marker = new AMap.value.CircleMarker({
       center: [cam.longitude, cam.latitude],
       radius: 5,
       strokeColor: '#22d3ee',
@@ -124,18 +130,33 @@ function drawEvents(): void {
   clear(eventMarkers)
   if (!amap.value || !showEvents.value) return
 
-  // 事件本身没有独立坐标，这里借用摄像头位置标注
+  // 优先用事件**自带的坐标**；没有时才回退到按摄像头反查。
+  //
+  // 回退路径是为历史数据保留的：坐标字段是后加的，早期写入的事件里没有。
+  // 但新事件都带坐标，不再依赖 `videoStore.cameras` —— 那个列表要在线
+  // 请求上游才能拿到，拉取失败时地图上就一个事件都画不出来。
   const byCamera = new Map(videoStore.cameras.map((cam) => [cam.cameraNum, cam]))
 
   eventStore.events
     .filter((event) => event.status === 'pending')
     .slice(0, 30)
     .forEach((event) => {
-      const cam = byCamera.get(event.cameraName) ?? byCamera.get(event.cameraId)
-      if (!cam?.longitude) return
+      let center: [number, number] | null = null
 
-      const marker = new amap.value.CircleMarker({
-        center: [cam.longitude, cam.latitude],
+      // 0 视为缺省值而非真实位置 —— (0, 0) 在几内亚湾
+      if (event.latitude && event.longitude) {
+        center = [event.longitude, event.latitude]
+      } else {
+        const cam = byCamera.get(event.cameraName) ?? byCamera.get(event.cameraId)
+        if (cam?.longitude && cam.latitude) {
+          center = [cam.longitude, cam.latitude]
+        }
+      }
+
+      if (!center) return
+
+      const marker = new AMap.value.CircleMarker({
+        center,
         radius: 9,
         strokeColor: '#ef4444',
         strokeWeight: 2,
@@ -202,7 +223,9 @@ onMounted(async () => {
     network.value = null
   }
 
-  amap.value = await create({
+  // 不再给 `amap` 赋值 —— 它现在是 useAmap 内部的 Map 实例 ref，
+  // create() 会把它设好，这里重复赋值反而会断开与 composable 的联系
+  await create({
     container: 'map-canvas',
     center: SHANGHAI_CENTER,
     zoom: 12,

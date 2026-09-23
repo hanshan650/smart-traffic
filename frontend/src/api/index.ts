@@ -86,8 +86,21 @@ export const detectionApi = {
       )
       .then((r) => r.data),
 
-  /** 从视频源抓帧检测 */
-  snapshot: (params: { source?: string; cameraNum: string; roadId?: string }) =>
+  /**
+   * 从视频源抓帧检测。
+   *
+   * `latitude` / `longitude` 建议传入：调用方从摄像头列表里已经拿到了
+   * 坐标，顺手上传能让生成的告警带上位置，地图上才能标出该事件。
+   * 服务端并不具备「按编号查摄像头」的能力（上游检索接口是按视野
+   * 随机抽样的），所以坐标只能由调用方提供。
+   */
+  snapshot: (params: {
+    source?: string
+    cameraNum: string
+    roadId?: string
+    latitude?: number
+    longitude?: number
+  }) =>
     http
       .post<DetectionResult>('/detection/snapshot', null, {
         params,
@@ -219,6 +232,8 @@ export const accidentApi = {
     source?: string
     frameCount?: number
     roadId?: string
+    latitude?: number
+    longitude?: number
   }) =>
     http
       .post<AnalyzeResult>('/accident/analyze', null, { params, timeout: 180000 })

@@ -60,7 +60,21 @@ export interface CreateMapOptions {
   center?: [number, number]
   zoom?: number
   showTraffic?: boolean
+  /**
+   * 地图样式。默认用于警务端的暗色，民众端应传入亮色。
+   *
+   * 为什么不做成"自动跟随主题"：高德样式是服务器端的预设名，
+   * 与 CSS 变量体系无关，只能由调用方明确指定。把它做成参数
+   * 比在 composable 里维护一份"某个页面该用什么色"的映射更直接。
+   */
+  mapStyle?: string
 }
+
+/** 暗色地图样式（警务端监控场景：降低暗环境眩光） */
+export const AMAP_STYLE_DARK = 'amap://styles/darkblue'
+
+/** 亮色地图样式（民众端：白天户外可读） */
+export const AMAP_STYLE_LIGHT = 'amap://styles/normal'
 
 export function useAmap() {
   const map = shallowRef<any>(null)
@@ -94,7 +108,7 @@ export function useAmap() {
         zoom: options.zoom ?? 12,
         center,
         viewMode: '2D',
-        mapStyle: 'amap://styles/darkblue',
+        mapStyle: options.mapStyle ?? AMAP_STYLE_DARK,
       })
 
       if (options.showTraffic !== false) {

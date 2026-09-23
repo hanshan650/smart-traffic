@@ -50,8 +50,16 @@ def _run_pipeline(
     road_name: str = '',
     source_key: str = '',
     source_url: str = '',
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
 ) -> DetectionResult:
-    """同步执行完整检测流水线（在线程池中调用）。"""
+    """同步执行完整检测流水线（在线程池中调用）。
+
+    ``latitude`` / ``longitude`` 由**调用方提供**而非在此查询：
+    调用方（前端）已经从摄像头列表里拿到了坐标，而服务端并没有
+    "按编号查摄像头"的能力（上游检索接口是按视野随机抽样返回的）。
+    坐标会写进检测记录、Redis 快照与生成的告警事件，供地图展示使用。
+    """
     outcome = detector.detect_image(image_path)
     snapshot = _snapshot_url(image_path)
 
@@ -68,6 +76,8 @@ def _run_pipeline(
             snapshot_url=snapshot,
             source_url=source_url,
             duration_ms=outcome.duration_ms,
+            latitude=latitude,
+            longitude=longitude,
         )
     except RuntimeError:
         pass
@@ -82,6 +92,8 @@ def _run_pipeline(
         vehicle_counts=outcome.vehicle_counts,
         congestion_level=outcome.congestion_level,
         snapshot_url=snapshot,
+        latitude=latitude,
+        longitude=longitude,
     )
 
     # ---- 3. 按拥堵等级生成事件（内含 60s 限流）----
@@ -96,6 +108,8 @@ def _run_pipeline(
             source_key=source_key,
             vehicle_count=outcome.total_vehicles,
             snapshot_url=snapshot,
+            latitude=latitude,
+            longitude=longitude,
         )
     except RuntimeError:
         pass
@@ -180,10 +194,16 @@ async def detect_live_snapshot(
     source: Optional[str] = Query(None, description='视频源 key'),
     camera_num: str = Query('', alias='cameraNum', description='摄像头编号'),
     road_id: str = Query('R001'),
+    latitude: Optional[float] = Query(None, description='摄像头纬度（由前端传入）'),
+    longitude: Optional[float] = Query(None, description='摄像头经度（由前端传入）'),
 ) -> DetectionResult:
     """从视频源抓取一帧并检测。
 
     这是把「视频源适配层」与「检测服务」串起来的核心接口。
+
+    ``latitude`` / ``longitude`` 是可选的：调用方从摄像头列表里已经拿到
+    坐标，顺手传过来即可让生成的告警带上位置；不传也能正常工作，
+    只是地图上无法定位该事件。
     """
     try:
         provider = video_source.get_provider(source)
@@ -202,6 +222,8 @@ async def detect_live_snapshot(
             road_name=road_id,
             source_key=provider.key,
             source_url=stream_url,
+            latitude=latitude,
+            longitude=longitude,
         )
     except DetectorUnavailable as exc:
         raise HTTPException(

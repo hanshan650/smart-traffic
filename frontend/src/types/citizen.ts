@@ -29,6 +29,15 @@ export interface PublicEvent {
   roadName: string
   congestionLevel: string
   congestionLabel: string
+  /**
+   * 事件坐标（已由后端降精度到约百米级）。
+   *
+   * 可选：早期写入的事件没有坐标字段（当时数据模型里还没这一项），
+   * 地图上会跳过它们。同时为 0 也要当成"无坐标"—— 那通常是缺省值
+   * 而非真实位置（(0,0) 在几内亚湾）。
+   */
+  latitude?: number | null
+  longitude?: number | null
   createdAt?: string | null
 }
 
@@ -44,6 +53,8 @@ export interface CongestionRankItem {
   vehicleCount: number
   congestionLevel: string
   congestionLabel: string
+  latitude?: number | null
+  longitude?: number | null
   updatedAt?: string | null
 }
 
@@ -65,6 +76,8 @@ export interface PublicAdvice {
     congestionLevel: string
     congestionLabel: string
     vehicleCount: number
+    latitude?: number | null
+    longitude?: number | null
     suggestion: string
   }[]
   generatedAt: string

@@ -132,6 +132,9 @@ export interface TrafficEvent {
   snapshotUrl: string
   vehicleCount: number
   congestionLevel: CongestionLevel
+  /** 事件坐标。早期事件可能没有该字段（坐标是后加进数据模型的）。 */
+  latitude?: number | null
+  longitude?: number | null
   createdAt: string
   reviewedAt: string | null
   reviewedBy: string | null

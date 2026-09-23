@@ -80,6 +80,8 @@ def save_detection(
     snapshot_url: str = '',
     source_url: str = '',
     duration_ms: int = 0,
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
 ) -> str:
     """写入一条检测记录，返回其 id。"""
     document = {
@@ -92,6 +94,8 @@ def save_detection(
         'snapshot_url': snapshot_url,
         'source_url': source_url,
         'duration_ms': duration_ms,
+        'latitude': latitude,
+        'longitude': longitude,
         'timestamp': datetime.utcnow(),
     }
 
@@ -145,6 +149,8 @@ def cache_snapshot(
     vehicle_counts: Dict[str, int],
     congestion_level: CongestionLevel,
     snapshot_url: str,
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
 ) -> None:
     """写入 Redis 快照并更新拥堵排行。"""
     snapshot = {
@@ -156,6 +162,9 @@ def cache_snapshot(
         'vehicleCounts': vehicle_counts,
         'congestionLevel': congestion_level.value,
         'snapshotUrl': snapshot_url,
+        # 坐标存进快照，供地图展示使用
+        'latitude': latitude,
+        'longitude': longitude,
         'updatedAt': datetime.utcnow().isoformat(),
     }
 
@@ -206,6 +215,8 @@ def create_event(
     vehicle_count: int = 0,
     congestion_level: CongestionLevel = CongestionLevel.NORMAL,
     throttle_seconds: Optional[int] = None,
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
 ) -> Optional[TrafficEvent]:
     """创建事件。
 
@@ -239,6 +250,8 @@ def create_event(
         snapshot_url=snapshot_url,
         vehicle_count=vehicle_count,
         congestion_level=congestion_level,
+        latitude=latitude,
+        longitude=longitude,
         created_at=datetime.utcnow(),
     )
 
@@ -270,6 +283,8 @@ def event_from_congestion(
     source_key: str,
     vehicle_count: int,
     snapshot_url: str = '',
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
 ) -> Optional[TrafficEvent]:
     """按拥堵等级自动生成事件（未达阈值则返回 None）。"""
     level = _CONGESTION_EVENT_LEVEL.get(congestion_level)

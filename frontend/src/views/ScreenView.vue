@@ -39,6 +39,10 @@ interface WallCamera {
   detecting: boolean
   totalVehicles: number
   congestionLevel: CongestionLevel
+  // 摄像头坐标。检测时顺带上传给后端，让生成的告警能在地图上定位 ——
+  // 服务端无法按编号回查摄像头（上游检索接口是按视野随机抽样的）。
+  latitude: number
+  longitude: number
 }
 
 const SCREEN_WIDTH = 1920
@@ -107,6 +111,8 @@ async function setupWall(count = 4): Promise<void> {
         detecting: false,
         totalVehicles: 0,
         congestionLevel: 'normal',
+        latitude: cam.latitude ?? 0,
+        longitude: cam.longitude ?? 0,
       })
     } catch {
       // 单路失败不阻断整体
@@ -127,9 +133,14 @@ async function detectAll(): Promise<void> {
   for (const cam of wallCameras.value) {
     cam.detecting = true
     try {
+      // 带上摄像头坐标：服务端拿不到「按编号查摄像头」的能力
+      // （上游检索接口是按视野随机抽样的），坐标只能由调用方提供。
+      // 传过去之后生成的告警才能在地图上定位。
       const result = await detectionApi.snapshot({
         cameraNum: cam.cameraNum,
         roadId: cam.roadId,
+        latitude: cam.latitude || undefined,
+        longitude: cam.longitude || undefined,
       })
       cam.totalVehicles = result.totalVehicles
       cam.congestionLevel = result.congestionLevel
