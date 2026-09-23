@@ -112,13 +112,26 @@ export function useGeolocation() {
         // 直接混用会有数十到数百米偏移（详见 utils/geo.ts 的说明）
         const [lat, lng] = wgs84ToGcj02(latitude, longitude)
 
+        /*
+          静止时不要把 heading 当真。
+          很多手机静止时会报告 heading = 0（磁力计朝向正北），
+          而不是 null —— 于是"落在正南方的事件"会被判成"已在身后"，
+          静静停在路边也会看到前方事件凭空少一半。
+
+          用 speed 兜底：几乎不动时方向没有意义。
+          阈值取 0.5 m/s（约 1.8 km/h）—— 比步行还慢，只用来排除静止。
+        */
+        const still = typeof speed === 'number' && Number.isFinite(speed) && speed < 0.5
+        const headingAvailable =
+          !still && typeof heading === 'number' && Number.isFinite(heading)
+
         fix.value = {
           lat,
           lng,
           accuracy: accuracy ?? 0,
-          // heading 在静止时是 null 或 NaN，这里统一成 null，
-          // 让调用方明确知道"方向未知"而不是收到 0（正北）
-          heading: typeof heading === 'number' && Number.isFinite(heading) ? heading : null,
+          // 方向未知时明确给 null，让调用方跳过"前方/后方"判断，
+          // 而不是收到 0 之后误以为用户正朝正北走
+          heading: headingAvailable ? (heading as number) : null,
           speed: typeof speed === 'number' && Number.isFinite(speed) ? speed : null,
           at: pos.timestamp ?? Date.now(),
         }

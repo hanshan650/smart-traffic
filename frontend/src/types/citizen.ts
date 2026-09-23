@@ -45,6 +45,15 @@ export interface PublicTrafficResponse {
   success: boolean
   total: number
   items: PublicEvent[]
+  /**
+   * 是否来自演示数据。
+   *
+   * 真实数据一条都没有时，后端会拿一批造好的上海事件补位。
+   * 那些坐标与描述是编的 —— 界面**必须**据此提示用户，
+   * 否则它和真实路况长得一模一样，而把编的位置当路况看，
+   * 比"看不到内容"严重得多。
+   */
+  demo?: boolean
   generatedAt: string
 }
 
@@ -65,6 +74,8 @@ export interface PublicOverview {
   eventCounts: Record<string, number>
   eventTotal: number
   congestionCounts: Record<string, number>
+  /** 见 `PublicTrafficResponse.demo` */
+  demo?: boolean
   generatedAt: string
 }
 

@@ -41,6 +41,8 @@ const props = defineProps<{
   rank: CongestionRankItem[]
   /** 可手动选择的路段名 */
   roads: string[]
+  /** 数据是否来自演示源。true 时顶部常驻提示条 */
+  demo?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -454,8 +456,19 @@ function pickRoad(road: string): void {
 </script>
 
 <template>
-  <div class="map-wrap">
+  <div class="map-wrap" :class="{ 'has-demo': demo }">
     <div :id="containerId" class="map-canvas" />
+
+    <!--
+      演示数据提示。
+      不能只做成一个小标签：这些坐标与描述都是编的，
+      一旦和真实路况长得一样，看的人没有任何依据分辨 ——
+      拿一个编的位置去规划出行，比看不到内容严重得多。
+      所以做成通栏色条，占满宽度、用警告色。
+    -->
+    <div v-if="demo" class="demo-banner">
+      演示数据 · 非真实路况
+    </div>
 
     <div v-if="loading" class="map-mask">地图加载中…</div>
     <div v-else-if="error" class="map-mask">
@@ -692,6 +705,12 @@ function pickRoad(road: string): void {
   position: relative;
   width: 100%;
   /*
+    提示条高度参与顶部浮层的定位。
+    用变量而不是给 .topbar 写两条规则：后者要在两个地方各维护一份边距，
+    改一处忘一处就会出现提示条压住路段卡。
+  */
+  --banner-h: 0px;
+  /*
     地图是主视图，占满视口剩余空间。
     用 dvh 而非 vh：移动端浏览器地址栏收起时 vh 不会更新，
     底部会露出一截被遮住的地图。
@@ -719,6 +738,25 @@ function pickRoad(road: string): void {
     flex: 1;
     min-height: 0;
   }
+}
+
+.map-wrap.has-demo {
+  --banner-h: 24px;
+}
+
+.demo-banner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 14;
+  padding: 4px 10px;
+  background: #f59e0b;
+  color: #fff;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-align: center;
+  letter-spacing: 0.3px;
 }
 .map-canvas {
   width: 100%;
@@ -765,7 +803,7 @@ function pickRoad(road: string): void {
 
 .topbar {
   position: absolute;
-  top: clamp(8px, 0.4vw + 6.4px, 10px);
+  top: calc(var(--banner-h) + clamp(8px, 0.4vw + 6.4px, 10px));
   left: clamp(8px, 0.4vw + 6.4px, 10px);
   right: clamp(8px, 0.4vw + 6.4px, 10px);
   display: flex;

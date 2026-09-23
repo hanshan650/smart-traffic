@@ -3,6 +3,7 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     accident,
+    demo,
     detection,
     events,
     incidents,
@@ -27,3 +28,4 @@ api_router.include_router(incidents.router)
 api_router.include_router(surveillance.router)
 api_router.include_router(reports.router)
 api_router.include_router(public.router)
+api_router.include_router(demo.router)
