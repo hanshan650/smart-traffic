@@ -68,6 +68,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '警员管理', icon: '☰' },
       },
       {
+        path: 'surveillance',
+        name: 'surveillance',
+        component: () => import('@/views/SurveillanceView.vue'),
+        meta: { title: '违停监控', icon: '⊙' },
+      },
+      {
         path: 'system',
         name: 'system',
         component: () => import('@/views/SystemView.vue'),

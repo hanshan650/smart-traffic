@@ -617,3 +617,116 @@ class IncidentStats(CamelModel):
     report_failed: int = 0
     unassigned: int = 0
     avg_dispatch_minutes: float = 0.0
+
+
+# ==========================================================================
+# 持续检测（违停监控）
+# ==========================================================================
+
+class SurveillanceStartRequest(CamelModel):
+    """启动巡检。省略 ``camera_ids`` 时取配置中的列表。
+
+    ``hints`` 是**点位名称映射**（摄像头编号 -> 名称），用于判定该地点
+    是否允许停车。
+
+    为什么不自动从上游取名称：上游的摄像头检索接口是按视野范围
+    **随机抽样**返回的，没有"按编号查详情"的能力，无法可靠地拿到
+    指定摄像头的名称。而且"这个点位是不是服务区"本来就是**部署时应当
+    核实**的事实，由使用方显式声明比系统猜测更可信。
+
+    名称里包含"服务区""收费站""检查站"等关键词即判定为可停车场所。
+    """
+
+    camera_ids: List[str] = Field(default_factory=list)
+    hints: Dict[str, str] = Field(default_factory=dict)
+
+
+class AlertStatusRequest(CamelModel):
+    """告警处置。``status`` ∈ {verified, dismissed, handled}。"""
+
+    status: str
+    note: str = ''
+
+
+class OwnerLookupRequest(CamelModel):
+    """车主信息查询请求。
+
+    ``operator`` 与 ``reason`` 都是**必填** —— 机动车所有人信息属于受保护的
+    个人信息，查询行为必须可追溯。缺少任一项时服务层会直接拒绝。
+
+    ``plate`` 应当来自车牌识别结果；若识别通道不可用，则不会有可查询的车牌，
+    本接口也不会被调用 —— 这条链路是自洽的。
+    """
+
+    plate: str
+    operator: str
+    reason: str
+    purpose: str = '违停告警核查'
+    # 留空则使用配置中的默认通道
+    provider: str = ''
+    # 关联的告警单与摄像头，用于让审计记录能回溯到具体事件
+    alert_id: str = ''
+    camera_id: str = ''
+
+
+class PlateEstimateRequest(CamelModel):
+    """车牌可读性估算（诊断用）。"""
+
+    bbox_width: float
+    bbox_height: float
+    frame_width: int = 352
+    frame_height: int = 288
+
+
+class AlertEvidence(CamelModel):
+    """违停告警中的单条判据。结构与事故识别、派警的证据链一致。"""
+
+    name: str
+    label: str
+    raw_value: float
+    score: float
+    weight: float
+    contribution: float
+    detail: str = ''
+
+
+class StallAlert(CamelModel):
+    """违停告警记录。
+
+    这个模型存在的意义不只是"定义字段" —— 它还承担**输出格式统一**的职责。
+    此前接口直接把 MongoDB 文档原样返回，于是响应里是 ``camera_id`` 这样的
+    snake_case 字段，而项目其余接口一律输出 camelCase。前端按统一约定解析时
+    就会拿到空值。经 Pydantic 走一遍，格式就与其它接口对齐了。
+    """
+
+    id: str = ''
+    camera_id: str = ''
+    camera_name: str = ''
+    road_id: str = ''
+    track_id: int = 0
+    class_name: str = ''
+    stationary_seconds: float = 0.0
+    score: float = 0.0
+    displacement: float = 0.0
+    zone_type: str = 'highway'
+    zone_label: str = ''
+    snapshot_url: str = ''
+    evidences: List[AlertEvidence] = Field(default_factory=list)
+
+    # 车牌相关。识别不可用时 plate 为空，原因写在 plate_message 里 ——
+    # 前端要能区分"没有车牌"和"识别失败"
+    plate: str = ''
+    plate_simulated: bool = False
+    plate_message: str = ''
+    plate_char_height: float = 0.0
+    plate_readability: str = 'unreadable'
+
+    status: str = 'pending'
+    note: str = ''
+    created_at: Optional[str] = None
+
+
+class StallAlertListResponse(CamelModel):
+    success: bool = True
+    total: int = 0
+    items: List[StallAlert] = Field(default_factory=list)

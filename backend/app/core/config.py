@@ -132,8 +132,52 @@ class Settings(BaseSettings):
     max_upload_mb: int = 100
 
     # ------------------------------------------------------------------
+    # 持续检测（违停监控）
+    # ------------------------------------------------------------------
+    # 服务启动时是否自动开始巡检。默认关闭 —— 巡检会持续占用 CPU，
+    # 应当由使用者显式开启，而不是启动服务就默默跑起来。
+    surveillance_enabled: bool = False
+    # 巡检摄像头列表（逗号分隔）。留空则使用当前视频源的默认摄像头。
+    surveillance_cameras: str = ''
+    # 轮次间隔（秒）。一轮 = 连续抓 N 帧分析 + 分析。
+    # 不宜过小：单帧推理约 200ms，间隔太小会让 CPU 持续饱和。
+    surveillance_interval: int = 15
+    # 每轮抓取的帧数。帧数越多跟踪越稳，但一轮耗时越长。
+    surveillance_frame_count: int = 20
+    # 单轮超时（秒），超时后跳过本轮而不阻塞后续轮次
+    surveillance_round_timeout: int = 120
+
+    # 静止判定阈值（秒）。需求给定：非可停车地点静止超过 30 秒即告警
+    stall_seconds: float = 30.0
+    # 静止判定的位移阈值（归一化坐标）。约 3.5 像素，略高于检测框抖动
+    stall_displacement: float = 0.01
+    # 同步静止占比达到该值即判为拥堵排队（抑制违停告警）
+    stall_crowd_ratio: float = 0.6
+    # 判定为异常所需的最低综合得分
+    stall_score_threshold: float = 0.60
+    # 统计"同步静止车辆数"时的最短静止时长（秒）。
+    # 不能设为 0：只要两帧间位移小于阈值就会得到 >0 的时长，
+    # 设 0 会把所有慢速行驶的车都算成静止，使拥堵抑制误触发。
+    stall_count_min_stationary: float = 2.0
+    # 同一目标重复告警的冷却时间（秒）
+    stall_alert_cooldown: int = 300
+    # 观测新鲜度上限（秒）。超过该时长无新观测的轨迹不再参与判定
+    stall_observation_gap: float = 45.0
+
+    # 场景文字（可停车场所）识别通道：keyword（默认，匹配点位名称）| ocr
+    surveillance_text: str = 'keyword'
+    # 车牌识别通道：none（默认，未接入）| mock（演示）| official（正式）
+    surveillance_plate_engine: str = 'none'
+    # 车主信息查询通道：none（默认，未接入）| mock（演示）| official（正式）
+    surveillance_owner_provider: str = 'none'
+
+    # ------------------------------------------------------------------
     # 派生属性
     # ------------------------------------------------------------------
+    @property
+    def surveillance_camera_list(self) -> List[str]:
+        return [item.strip() for item in self.surveillance_cameras.split(',') if item.strip()]
+
     @property
     def cors_origin_list(self) -> List[str]:
         return [item.strip() for item in self.cors_origins.split(',') if item.strip()]
