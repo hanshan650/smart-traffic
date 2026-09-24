@@ -40,6 +40,11 @@ echo   地址：http://127.0.0.1:8000
 echo   文档：http://127.0.0.1:8000/docs
 echo ============================================================
 echo.
+echo [首次使用] 警务端需要登录，口令要先初始化一次。重复执行是安全的，
+echo            只会给还没有口令的账号补上：
+echo              .venv\Scripts\python.exe scripts\seed_credentials.py
+echo            登录名是警号，初始口令见 .env 的 AUTH_DEFAULT_PASSWORD。
+echo.
 
 ".venv\Scripts\python.exe" -m uvicorn app.main:app --host 127.0.0.1 --port 8000 %*
 
