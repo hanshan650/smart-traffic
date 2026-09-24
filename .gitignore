@@ -26,6 +26,11 @@ backend/.env
 credentials.json
 service-account*.json
 
+# 临时落地的密钥文本（sk- 前缀是常见的密钥命名）。
+# 这类文件要**保留在本地**（还在用），但绝不能进仓库 —— 一次 git add -A
+# 就会带上去，而密钥一旦推上去，删掉文件也仍然留在历史里。
+sk-*.txt
+
 # 注意：以下文件是**脱敏模板**，必须保留在仓库中，供他人复制后填写
 #   backend/.env.example
 #   frontend/.env.development
