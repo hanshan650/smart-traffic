@@ -16,7 +16,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from bson import ObjectId
@@ -28,6 +28,7 @@ from app.models.schemas import (
     Officer,
     OfficerCreate,
     OfficerListResponse,
+    OfficerLocationUpdate,
     OfficerSkill,
     OfficerStats,
     OfficerStatus,
@@ -35,6 +36,9 @@ from app.models.schemas import (
 )
 
 OFFICER_ID = 'officer_id'
+
+#: 位置上报在该窗口内视为“实时活跃”。与前端展示文案保持一致。
+LOCATION_ACTIVE_SECONDS = 300
 
 
 class OfficerError(RuntimeError):
@@ -202,20 +206,62 @@ def list_available() -> List[Officer]:
     return [_to_officer(item) for item in documents]
 
 
-def stats() -> OfficerStats:
-    """勤务概览（供首页与调度台展示）。"""
+def _has_location(document: Dict[str, Any]) -> bool:
+    """(0, 0) 视为未上报，而不是几内亚湾的真实位置。"""
     try:
-        documents = list(_collection().find({}, {'status': 1, 'unit': 1}))
+        latitude = float(document.get('latitude') or 0)
+        longitude = float(document.get('longitude') or 0)
+    except (TypeError, ValueError):
+        return False
+    return abs(latitude) > 1e-7 and abs(longitude) > 1e-7
+
+
+def _location_is_active(document: Dict[str, Any], now: datetime) -> bool:
+    last_seen = document.get('last_seen')
+    if not isinstance(last_seen, datetime):
+        return False
+    if last_seen.tzinfo is not None:
+        last_seen = last_seen.astimezone(timezone.utc).replace(tzinfo=None)
+    age = (now - last_seen).total_seconds()
+    return 0 <= age <= LOCATION_ACTIVE_SECONDS
+
+
+def stats() -> OfficerStats:
+    """勤务概览（供首页与调度台展示）。
+
+    位置统计与勤务统计一次扫描完成，避免首页为“在岗人数”和
+    “定位活跃人数”分别查库。
+    """
+    try:
+        documents = list(
+            _collection().find(
+                {},
+                {
+                    'status': 1,
+                    'unit': 1,
+                    'latitude': 1,
+                    'longitude': 1,
+                    'last_seen': 1,
+                },
+            )
+        )
     except PyMongoError as exc:
         raise OfficerError(f'统计警员失败：{exc}') from exc
 
+    now = datetime.utcnow()
     by_status: Dict[str, int] = {item.value: 0 for item in OfficerStatus}
     by_unit: Dict[str, int] = {}
+    with_location = 0
+    location_active = 0
     for item in documents:
         status = str(item.get('status') or OfficerStatus.OFF_DUTY.value)
         by_status[status] = by_status.get(status, 0) + 1
         unit = str(item.get('unit') or '未分配')
         by_unit[unit] = by_unit.get(unit, 0) + 1
+        if _has_location(item):
+            with_location += 1
+            if _location_is_active(item, now):
+                location_active += 1
 
     return OfficerStats(
         total=len(documents),
@@ -224,6 +270,9 @@ def stats() -> OfficerStats:
         off_duty=by_status.get(OfficerStatus.OFF_DUTY.value, 0),
         leave=by_status.get(OfficerStatus.LEAVE.value, 0),
         by_unit=by_unit,
+        with_location=with_location,
+        location_active=location_active,
+        location_active_window=LOCATION_ACTIVE_SECONDS,
     )
 
 
@@ -265,7 +314,13 @@ def update_officer(officer_id: str, payload: OfficerUpdate) -> Optional[Officer]
     if 'status' in changes and isinstance(changes['status'], OfficerStatus):
         changes['status'] = changes['status'].value
 
-    changes['updated_at'] = datetime.utcnow()
+    now = datetime.utcnow()
+    changes['updated_at'] = now
+    # 通过普通编辑改坐标同样视为一次位置上报，否则前端无法判断新坐标是否新鲜，
+    # 也不会触发实时推送。
+    if 'latitude' in changes or 'longitude' in changes:
+        changes['last_seen'] = now
+        changes.setdefault('location_source', 'manual')
 
     try:
         document = _collection().find_one_and_update(
@@ -276,6 +331,34 @@ def update_officer(officer_id: str, payload: OfficerUpdate) -> Optional[Officer]
     except PyMongoError as exc:
         raise OfficerError(f'更新警员失败：{exc}') from exc
 
+    return _to_officer(document) if document else None
+
+
+def update_location(
+    officer_id: str, payload: OfficerLocationUpdate
+) -> Optional[Officer]:
+    """更新警员实时位置。
+
+    只写位置相关字段，不碰档案；``last_seen`` 由服务端时钟生成，
+    不接受客户端时间，避免设备时钟漂移污染“实时”判定。
+    """
+    now = datetime.utcnow()
+    changes = {
+        'latitude': payload.latitude,
+        'longitude': payload.longitude,
+        'location_accuracy': payload.accuracy,
+        'location_source': (payload.source or '').strip()[:32] or 'browser',
+        'last_seen': now,
+        'updated_at': now,
+    }
+    try:
+        document = _collection().find_one_and_update(
+            {OFFICER_ID: officer_id},
+            {'$set': changes},
+            return_document=ReturnDocument.AFTER,
+        )
+    except PyMongoError as exc:
+        raise OfficerError(f'更新警员位置失败：{exc}') from exc
     return _to_officer(document) if document else None
 
 

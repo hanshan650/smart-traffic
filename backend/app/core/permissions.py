@@ -86,6 +86,12 @@ WRITE_RULES: List[Tuple[str, frozenset]] = [
     # 漏掉这一条的后角很具体：非管理员点"退出登录"会拿到 403，退不出去 ——
     # 默认拒绝规则会把登出当成"需要特权的写操作"。
     (r'^/api/v1/auth/(logout|password)$', ALL_ROLES),
+    # 实时位置：值班员需要维护在岗警力位置，但不允许改档案。
+    # 必须先于下面的 officers 通用规则，否则会被“仅 admin”覆盖。
+    (
+        r'^/api/v1/officers/[^/]+/location$',
+        frozenset({Role.ADMIN.value, Role.DISPATCHER.value}),
+    ),
     # 警员档案：增删改都是管理员的事。值班员派警只需要**读**警员列表
     (r'^/api/v1/officers', frozenset({Role.ADMIN.value})),
     # 在线改配置（写 .env）：仅管理员

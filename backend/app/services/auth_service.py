@@ -40,6 +40,9 @@ SESSION_COLLECTION = 'auth_sessions'
 _PBKDF2_ROUNDS = 260_000
 _SALT_BYTES = 16
 _TOKEN_BYTES = 32
+   # 会话活跃时间的落库间隔。每个请求都写一次 last_seen_at 意义不大，
+# 反而让认证热路径多一次写操作；节流到分钟级足够支撑"最近活跃"展示。
+_SESSION_TOUCH_SECONDS = 60
 
 # 口令最短长度。太短的直接拒绝，避免 seed 出一个 "123" 这种东西
 MIN_PASSWORD_LENGTH = 8
@@ -132,6 +135,10 @@ def ensure_indexes() -> None:
     if db is None:
         return
     try:
+        # 每个受保护请求都按 token_hash 查会话，没有这个索引就是全表扫描
+        db[SESSION_COLLECTION].create_index(
+            'token_hash', name='idx_session_token', unique=True
+        )
         db[SESSION_COLLECTION].create_index('expires_at', expireAfterSeconds=0)
         db[SESSION_COLLECTION].create_index('officer_id')
     except Exception:
@@ -174,11 +181,23 @@ def get_session(token: str) -> Optional[Dict[str, Any]]:
 
 
 def touch_session(token: str) -> None:
-    """记录最近活跃时间。单独写、不阻塞请求 —— 失败也不影响本次响应"""
+    """记录最近活跃时间，按 ``_SESSION_TOUCH_SECONDS`` 节流。
+
+    条件写入把"是否该更新"交给数据库判断，避免先读一次再写一次；
+    失败也不影响本次响应。
+    """
+    if not token:
+        return
+    now = datetime.utcnow()
     try:
         _collection().update_one(
-            {'token_hash': _token_digest(token)},
-            {'$set': {'last_seen_at': datetime.utcnow()}},
+            {
+                'token_hash': _token_digest(token),
+                'last_seen_at': {
+                    '$lt': now - timedelta(seconds=_SESSION_TOUCH_SECONDS)
+                },
+            },
+            {'$set': {'last_seen_at': now}},
         )
     except Exception:
         pass

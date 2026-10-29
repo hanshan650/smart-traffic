@@ -308,6 +308,7 @@ class WsMessage(CamelModel):
       · ``event:new``      新事件产生
       · ``event:update``   事件状态变更
       · ``snapshot``       检测快照更新
+        · ``officer:update`` 警员位置/状态实时变化
       · ``health``         系统健康状态
       · ``pong``           心跳应答
     """
@@ -394,12 +395,32 @@ class Officer(OfficerBase):
     """警员（出参）。"""
 
     id: str
+    # 最近一次位置上报的元数据。last_seen 只由位置更新写入，
+    # 与档案 updated_at 分开，便于判断“位置是否仍然新鲜”。
+    location_accuracy: float = 0.0
+    location_source: str = ''
+    last_seen: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
 
 class OfficerCreate(OfficerBase):
     """新增警员入参。"""
+
+
+class OfficerLocationUpdate(CamelModel):
+    """警员实时位置上报。
+
+    坐标约定为 GCJ-02（与高德地图一致）。浏览器定位已完成 WGS84→GCJ-02
+    转换后再提交，后端不再重复转换。
+    """
+
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    # 定位精度半径（米）。0 表示设备未提供。
+    accuracy: float = Field(default=0.0, ge=0, le=100000)
+    # browser / device / manual。保留字符串以便后续接入专用定位设备。
+    source: str = Field(default='browser', max_length=32)
 
 
 class OfficerUpdate(CamelModel):
@@ -435,6 +456,10 @@ class OfficerStats(CamelModel):
     off_duty: int = 0
     leave: int = 0
     by_unit: Dict[str, int] = Field(default_factory=dict)
+    # 有有效坐标的人数，以及最近一个统计窗口内上报过位置的人数
+    with_location: int = 0
+    location_active: int = 0
+    location_active_window: int = 300
 
 
 # ==========================================================================

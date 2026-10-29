@@ -46,7 +46,7 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from app.core.config import settings
@@ -600,18 +600,74 @@ def _to_alert(document: Dict[str, Any]) -> Dict[str, Any]:
     return StallAlert.model_validate(payload).model_dump(by_alias=True)
 
 
-def list_alerts(limit: int = 50, camera_id: str = '', status: str = '') -> List[Dict[str, Any]]:
-    """查询历史违停告警。"""
+def _alert_filter(
+    camera_id: str = '',
+    status: str = '',
+    start_time: Optional[datetime] = None,
+    end_time: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    query: Dict[str, Any] = {}
+    if camera_id:
+        query['camera_id'] = camera_id
+    if status:
+        query['status'] = status
+
+    created_at: Dict[str, datetime] = {}
+    if start_time:
+        if start_time.tzinfo:
+            start_time = start_time.astimezone(timezone.utc).replace(tzinfo=None)
+        created_at['$gte'] = start_time
+    if end_time:
+        if end_time.tzinfo:
+            end_time = end_time.astimezone(timezone.utc).replace(tzinfo=None)
+        created_at['$lte'] = end_time
+    if created_at:
+        query['created_at'] = created_at
+    return query
+
+
+def _find_alerts(query: Dict[str, Any], limit: int, offset: int = 0):
+    return (
+        get_db()[ALERT_COLLECTION]
+        .find(query)
+        .sort('created_at', -1)
+        .skip(offset)
+        .limit(limit)
+    )
+
+
+def list_alerts(
+    limit: int = 50,
+    camera_id: str = '',
+    status: str = '',
+    start_time: Optional[datetime] = None,
+    end_time: Optional[datetime] = None,
+) -> List[Dict[str, Any]]:
+    """查询历史违停告警，保留原有列表返回契约。"""
     try:
-        query: Dict[str, Any] = {}
-        if camera_id:
-            query['camera_id'] = camera_id
-        if status:
-            query['status'] = status
-        cursor = get_db()[ALERT_COLLECTION].find(query).sort('created_at', -1).limit(limit)
-        return [_to_alert(document) for document in cursor]
+        query = _alert_filter(camera_id, status, start_time, end_time)
+        return [_to_alert(document) for document in _find_alerts(query, limit)]
     except Exception:  # noqa: BLE001
         return []
+
+
+def query_alerts(
+    page: int = 1,
+    page_size: int = 20,
+    camera_id: str = '',
+    status: str = '',
+    start_time: Optional[datetime] = None,
+    end_time: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """按相同条件查询当前页与全量总数，数据库异常向上传递。"""
+    query = _alert_filter(camera_id, status, start_time, end_time)
+    collection = get_db()[ALERT_COLLECTION]
+    total = collection.count_documents(query)
+    cursor = _find_alerts(query, page_size, (page - 1) * page_size)
+    return {
+        'items': [_to_alert(document) for document in cursor],
+        'total': total,
+    }
 
 
 def alert_stats() -> Dict[str, Any]:

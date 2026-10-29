@@ -24,7 +24,8 @@
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from starlette.concurrency import run_in_threadpool
@@ -116,14 +117,40 @@ def alert_overview() -> Dict[str, Any]:
 
 @router.get('/alerts', summary='告警列表')
 def list_alerts(
-    limit: int = Query(50, ge=1, le=500),
+    page: int = Query(1, ge=1, description='页码，从 1 开始'),
+    page_size: int = Query(20, alias='pageSize', ge=1, le=100),
+    limit: Optional[int] = Query(None, ge=1, le=500, description='兼容旧客户端的页大小'),
     camera_id: str = Query('', description='按摄像头过滤'),
     status: str = Query('', description='pending / verified / dismissed / handled'),
+    start_time: Optional[datetime] = Query(None, alias='startTime', description='起始时间（ISO 8601）'),
+    end_time: Optional[datetime] = Query(None, alias='endTime', description='结束时间（ISO 8601）'),
 ) -> Dict[str, Any]:
-    items = surveillance_service.list_alerts(
-        limit=limit, camera_id=camera_id, status=status
+    if start_time and end_time:
+        start_utc = start_time.timestamp()
+        end_utc = end_time.timestamp()
+        if start_utc > end_utc:
+            raise HTTPException(
+                status_code=400,
+                detail={'success': False, 'error': '开始时间不能晚于结束时间'},
+            )
+
+    effective_page_size = limit or page_size
+    result = surveillance_service.query_alerts(
+        page=page,
+        page_size=effective_page_size,
+        camera_id=camera_id,
+        status=status,
+        start_time=start_time,
+        end_time=end_time,
     )
-    return {'success': True, 'total': len(items), 'items': items}
+    total_pages = (result['total'] + effective_page_size - 1) // effective_page_size
+    return {
+        'success': True,
+        **result,
+        'page': page,
+        'pageSize': effective_page_size,
+        'totalPages': total_pages,
+    }
 
 
 @router.get('/alerts/{alert_id}', summary='告警详情')

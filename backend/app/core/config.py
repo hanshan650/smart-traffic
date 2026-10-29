@@ -73,6 +73,13 @@ class Settings(BaseSettings):
     hngs_viewport_sw: str = '110.5,31.0'
     hngs_viewport_zoom: str = '8'
 
+    # HLS 代理安全边界。域名支持其子域名；额外 CDN 可用逗号追加。
+    # 上游主播放列表在 hngscloud.com，子播放列表会切到 livehwc4.com CDN；
+    # 两者都必须允许，否则播放到第二跳就会 403。
+    hls_allowed_hosts: str = 'hngscloud.com,livehwc4.com'
+    hls_max_playlist_bytes: int = 1024 * 1024
+    hls_max_segment_bytes: int = 16 * 1024 * 1024
+
     # ffmpeg 抽帧
     ffmpeg_path: str = ''
     frame_capture_timeout: int = 20
@@ -109,7 +116,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # 跨域
     # ------------------------------------------------------------------
-    cors_origins: str = 'http://localhost:5173,http://127.0.0.1:5173'
+    cors_origins: str = 'http://localhost:5174,http://127.0.0.1:5174'
 
     # ------------------------------------------------------------------
     # 上海路网 / 高德

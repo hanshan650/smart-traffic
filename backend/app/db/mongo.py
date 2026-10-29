@@ -74,6 +74,20 @@ def ensure_indexes() -> List[str]:
     )
     created.append('events(created_at, status, level, road+created_at)')
 
+    # 违停告警。列表页固定按 created_at 倒序分页，并常按摄像头/状态过滤；
+    # 没有这些索引时，翻页和 count_documents 都会扫描整个集合。
+    alerts = db['stall_alerts']
+    alerts.create_index([('created_at', DESCENDING)], name='idx_alert_created')
+    alerts.create_index(
+        [('camera_id', ASCENDING), ('created_at', DESCENDING)],
+        name='idx_alert_camera_created',
+    )
+    alerts.create_index(
+        [('status', ASCENDING), ('created_at', DESCENDING)],
+        name='idx_alert_status_created',
+    )
+    created.append('stall_alerts(created_at, camera+created_at, status+created_at)')
+
     # 警员档案。**不建地理索引** —— 派警需要按距离排序，
     # 但警员规模在百量级，应用层算直线距离（见 dispatch_service）
     # 比维护 GeoJSON 字段与 2dsphere 索引更简单。

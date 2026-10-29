@@ -81,7 +81,7 @@ def main() -> int:
             print(f'  ✗ 复核失败 {report_no}: {reviewed.text[:100]}')
 
     print(f'\n创建上报 {created} 条，复核通过 {approved} 条')
-    print('打开 http://localhost:5173/citizen 并切到「地图」查看')
+    print('打开 http://localhost:5174/citizen 并切到「地图」查看')
     return 0
 
 

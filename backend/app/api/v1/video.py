@@ -11,9 +11,11 @@
 """
 from __future__ import annotations
 
+import ipaddress
 import re
+import socket
 from typing import List, Optional
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, urljoin, urlsplit
 
 import requests
 from fastapi import APIRouter, HTTPException, Query, Response
@@ -141,21 +143,128 @@ def _rewrite_playlist(text: str, base_url: str, camera_num: str, source_key: str
     return '\n'.join(rewritten)
 
 
-def _fetch_upstream(url: str, provider) -> requests.Response:
-    """带 Provider 请求头拉取上游资源。"""
+def _proxy_error(status_code: int, error: str, hint: str = '') -> HTTPException:
+    return HTTPException(
+        status_code=status_code,
+        detail={
+            'success': False,
+            'error': error,
+            'hint': hint or '直播流地址可能已过期，请重新获取',
+        },
+    )
+
+
+def _validate_upstream_url(url: str, provider) -> None:
+    """仅允许访问白名单中的公网 HTTP(S) 地址，阻断 SSRF。"""
     try:
-        response = requests.get(url, headers=provider.request_headers, timeout=15)
-        response.raise_for_status()
-        return response
+        parsed = urlsplit(url)
+        host = (parsed.hostname or '').rstrip('.').lower()
+        port = parsed.port
+    except ValueError as exc:
+        raise _proxy_error(400, '上游资源地址格式不正确') from exc
+
+    if parsed.scheme not in {'http', 'https'} or not host:
+        raise _proxy_error(400, '上游资源仅支持有效的 HTTP(S) 地址')
+    if parsed.username or parsed.password:
+        raise _proxy_error(403, '上游资源地址不得包含凭据')
+    if port not in {None, 80, 443}:
+        raise _proxy_error(403, '上游资源端口不在允许范围内')
+
+    allowed = {
+        item.strip().lower().lstrip('.')
+        for item in settings.hls_allowed_hosts.split(',')
+        if item.strip()
+    }
+    for option in ('api_base', 'referer'):
+        try:
+            option_host = urlsplit(str(provider.options.get(option, ''))).hostname
+        except ValueError:
+            option_host = None
+        if option_host:
+            allowed.add(option_host.rstrip('.').lower())
+    if not any(host == domain or host.endswith(f'.{domain}') for domain in allowed):
+        raise _proxy_error(
+            403,
+            '上游资源主机不在视频源白名单中',
+            '视频源可能已切换到新的 CDN，请把对应域名加入后端 HLS_ALLOWED_HOSTS',
+        )
+
+    try:
+        addresses = socket.getaddrinfo(
+            host,
+            port or (443 if parsed.scheme == 'https' else 80),
+            type=socket.SOCK_STREAM,
+        )
+    except socket.gaierror as exc:
+        raise _proxy_error(502, '上游资源域名解析失败') from exc
+
+    for address in addresses:
+        ip = ipaddress.ip_address(address[4][0])
+        if not ip.is_global:
+            raise _proxy_error(403, '上游资源不得指向内网或保留地址')
+
+
+def _fetch_upstream(url: str, provider) -> requests.Response:
+    """校验每一跳地址后拉取上游资源，不自动信任重定向。"""
+    current_url = url
+    for _ in range(4):
+        _validate_upstream_url(current_url, provider)
+        response: Optional[requests.Response] = None
+        try:
+            response = requests.get(
+                current_url,
+                headers=provider.request_headers,
+                timeout=(5, 15),
+                stream=True,
+                allow_redirects=False,
+            )
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            if response is not None:
+                response.close()
+            raise _proxy_error(502, f'上游流请求失败：{type(exc).__name__}') from exc
+
+        if response.status_code not in {301, 302, 303, 307, 308}:
+            return response
+
+        location = response.headers.get('Location', '')
+        response.close()
+        if not location:
+            raise _proxy_error(502, '上游重定向缺少目标地址')
+        current_url = urljoin(current_url, location)
+
+    raise _proxy_error(502, '上游重定向次数过多')
+
+
+def _read_upstream(response: requests.Response, max_bytes: int) -> bytes:
+    """分块读取并限制响应体大小，避免上游异常内容耗尽内存。"""
+    content_length = response.headers.get('Content-Length', '')
+    if content_length.isdigit() and int(content_length) > max_bytes:
+        raise _proxy_error(502, '上游响应超过代理允许的大小上限')
+
+    chunks: List[bytes] = []
+    size = 0
+    try:
+        for chunk in response.iter_content(chunk_size=64 * 1024):
+            if not chunk:
+                continue
+            size += len(chunk)
+            if size > max_bytes:
+                raise _proxy_error(502, '上游响应超过代理允许的大小上限')
+            chunks.append(chunk)
     except requests.RequestException as exc:
-        raise HTTPException(
-            status_code=502,
-            detail={
-                'success': False,
-                'error': f'上游流请求失败：{exc}',
-                'hint': '直播流地址可能已过期，请重新获取',
-            },
-        ) from exc
+        raise _proxy_error(502, '读取上游响应中断') from exc
+    return b''.join(chunks)
+
+
+def _decode_playlist(content: bytes) -> str:
+    try:
+        text = content.decode('utf-8-sig')
+    except UnicodeDecodeError as exc:
+        raise _proxy_error(502, '上游播放列表不是有效的 UTF-8 文本') from exc
+    if not text.lstrip().startswith('#EXTM3U'):
+        raise _proxy_error(502, '上游未返回有效的 HLS 播放列表')
+    return text
 
 
 @router.get('/hls/{camera_num}/playlist.m3u8', summary='HLS 入口播放列表')
@@ -173,8 +282,10 @@ def hls_entry(
     except VideoSourceError as exc:
         raise _service_unavailable(exc) from exc
 
-    upstream = _fetch_upstream(upstream_url, provider)
-    body = _rewrite_playlist(upstream.text, upstream_url, camera_num, provider.key)
+    with _fetch_upstream(upstream_url, provider) as upstream:
+        content = _read_upstream(upstream, settings.hls_max_playlist_bytes)
+        base_url = upstream.url or upstream_url
+    body = _rewrite_playlist(_decode_playlist(content), base_url, camera_num, provider.key)
 
     return Response(
         content=body,
@@ -198,23 +309,29 @@ def hls_proxy(
     except VideoSourceError as exc:
         raise _service_unavailable(exc) from exc
 
-    upstream = _fetch_upstream(url, provider)
-    content_type = upstream.headers.get('Content-Type', '')
-
-    is_playlist = (
-        'mpegurl' in content_type.lower()
-        or url.split('?')[0].lower().endswith('.m3u8')
-    )
+    with _fetch_upstream(url, provider) as upstream:
+        content_type = upstream.headers.get('Content-Type', '')
+        base_url = upstream.url or url
+        is_playlist = (
+            'mpegurl' in content_type.lower()
+            or base_url.split('?')[0].lower().endswith('.m3u8')
+        )
+        max_bytes = (
+            settings.hls_max_playlist_bytes if is_playlist else settings.hls_max_segment_bytes
+        )
+        content = _read_upstream(upstream, max_bytes)
 
     if is_playlist:
         return Response(
-            content=_rewrite_playlist(upstream.text, url, camera_num, provider.key),
+            content=_rewrite_playlist(
+                _decode_playlist(content), base_url, camera_num, provider.key
+            ),
             media_type=_HLS_PLAYLIST_TYPE,
             headers={'Cache-Control': 'no-store'},
         )
 
     return Response(
-        content=upstream.content,
+        content=content,
         media_type=content_type or 'application/octet-stream',
         headers={'Cache-Control': 'no-store'},
     )

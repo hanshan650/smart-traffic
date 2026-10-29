@@ -8,6 +8,7 @@
 | ``POST   /officers``         | 新增                                      |
 | ``POST   /officers/seed``    | 导入示例警员（便于演示）                    |
 | ``PUT    /officers/{id}``    | 部分更新                                  |
+| ``PUT    /officers/{id}/location`` | 实时位置上报                        |
 | ``DELETE /officers/{id}``    | 删除                                      |
 +------------------------------+------------------------------------------+
 
@@ -24,9 +25,11 @@ from app.models.schemas import (
     Officer,
     OfficerCreate,
     OfficerListResponse,
+    OfficerLocationUpdate,
     OfficerStats,
     OfficerUpdate,
 )
+from app.realtime import ws_manager
 from app.services import officer_service
 from app.services.officer_service import OfficerError
 
@@ -47,6 +50,28 @@ def _service_unavailable(exc: OfficerError) -> HTTPException:
             'success': False,
             'error': str(exc),
             'hint': '请确认 MongoDB 已启动（警员档案需要持久化）',
+        },
+    )
+
+
+def _broadcast_officer(officer: Officer) -> None:
+    """推送警员位置与状态快照。
+
+    位置与勤务状态都在同一个频道更新：仪表盘的在岗人数和地图上的
+    警员颜色都依赖状态变化，分成两个频道会让页面漏刷新。
+    """
+    ws_manager.broadcast_threadsafe(
+        'officer:update',
+        {
+            'officerId': officer.officer_id,
+            'name': officer.name,
+            'unit': officer.unit,
+            'status': officer.status.value,
+            'latitude': officer.latitude,
+            'longitude': officer.longitude,
+            'accuracy': officer.location_accuracy,
+            'source': officer.location_source,
+            'lastSeen': officer.last_seen.isoformat() if officer.last_seen else None,
         },
     )
 
@@ -96,6 +121,33 @@ def seed_officers(
     }
 
 
+@router.put(
+    '/{officer_id}/location',
+    response_model=Officer,
+    summary='更新警员实时位置',
+)
+def update_officer_location(
+    officer_id: str, payload: OfficerLocationUpdate
+) -> Officer:
+    """写入当前坐标并广播 ``officer:update``。
+
+    位置与档案分开更新：设备可以高频上报，而姓名、单位等档案不应随之抖动。
+    """
+    try:
+        officer = officer_service.update_location(officer_id, payload)
+    except OfficerError as exc:
+        raise _bad_request(exc) from exc
+
+    if officer is None:
+        raise HTTPException(
+            status_code=404,
+            detail={'success': False, 'error': f'警员不存在：{officer_id}'},
+        )
+
+    _broadcast_officer(officer)
+    return officer
+
+
 @router.post('', response_model=Officer, summary='新增警员', status_code=201)
 def create_officer(payload: OfficerCreate) -> Officer:
     try:
@@ -133,6 +185,9 @@ def update_officer(officer_id: str, payload: OfficerUpdate) -> Officer:
             status_code=404,
             detail={'success': False, 'error': f'警员不存在：{officer_id}'},
         )
+
+    # 普通编辑同样推送：状态、单位、坐标变化都会影响实时统计与地图图层。
+    _broadcast_officer(officer)
     return officer
 
 
