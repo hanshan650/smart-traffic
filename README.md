@@ -315,6 +315,11 @@ haversine 算距离，比维护 2dsphere 更直观。
 
 对多路摄像头**轮次巡检**，判断"车辆在非可停车地点静止超过 30 秒"。
 
+**服务启动即自动巡检**，无需在页面上点「开始」（`SURVEILLANCE_ENABLED=true`）。
+违停判定靠跨时间观测得出「停了多久」，手动启动意味着无人值守时这一页是死的。
+巡检范围取 `SURVEILLANCE_CAMERAS`，留空则用视频源默认摄像头；需要临时让出
+CPU 时可在页面上暂停，或调用 `/surveillance/stop`。
+
 **时间基准是本模块的头号坑**：巡检分批抓帧，若用「帧号 ÷ 帧率」推算时间，
 轮次之间的十几秒空档会被完全抹掉（40 帧算出 4 秒而非 64 秒），
 30 秒阈值永远达不到。必须用 `time.monotonic()` 的真实时间。
@@ -533,7 +538,7 @@ adb reverse tcp:5174 tcp:5174
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/v1/surveillance/status` | 巡检状态 |
-| POST | `/api/v1/surveillance/start` | 开始巡检 |
+| POST | `/api/v1/surveillance/start` | 开始/恢复巡检（默认随服务自动开始） |
 | POST | `/api/v1/surveillance/stop` | 停止巡检 |
 | POST | `/api/v1/surveillance/cameras/{id}/toggle` | 暂停/恢复单路 |
 | GET | `/api/v1/surveillance/alerts` | 告警列表 |

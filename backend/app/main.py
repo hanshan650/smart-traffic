@@ -12,6 +12,7 @@ FastAPI 应用入口
   · 创建上传目录
   · 绑定事件循环（供线程池中的检测任务向 WebSocket 广播）
   · 探测 MongoDB / Redis / YOLO / 视频源，并打印降级提示
+  · 自动开启违停巡检（``SURVEILLANCE_ENABLED``，默认开启）
 """
 from __future__ import annotations
 
@@ -29,7 +30,13 @@ from app.core.config import settings
 from app.core.security import AuthMiddleware
 from app.db import mongo, redis_client
 from app.realtime.ws_manager import bind_loop
-from app.services import auth_service, detector, officer_service, video_source
+from app.services import (
+    auth_service,
+    detector,
+    officer_service,
+    surveillance_service,
+    video_source,
+)
 
 # 静态目录需在挂载前存在，故在模块导入阶段创建
 _STATIC_DIR = settings.upload_path.parent
@@ -80,6 +87,27 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             mark = '可用' if other.available else '仅接入位'
             print(f'        备选源 {other.key}（{other.display_name}）：{mark}')
 
+    # ---------------- 持续检测（违停巡检） ----------------
+    # **自动启动**：违停判定靠跨时间观测得出「停了多久」，必须持续巡检。
+    # 若每次都要人工点「开始巡检」，无人值守时这一页就是死的。
+    if not settings.surveillance_enabled:
+        print('[INFO]  违停巡检已按配置关闭（SURVEILLANCE_ENABLED=false）')
+    elif not yolo_ok:
+        # 巡检每轮都要推理，模型不可用时起一个注定报错的线程没有意义
+        print('[WARN]  违停巡检未自动启动：推理模型不可用')
+    elif not source.available:
+        print(f'[WARN]  违停巡检未自动启动：视频源不可用（{source.reason}）')
+    else:
+        started = surveillance_service.surveillance.start()
+        if started.get('started'):
+            cameras = '、'.join(started.get('cameras') or [])
+            print(
+                f'[OK]    违停巡检已自动启动：{cameras}'
+                f'（间隔 {started.get("interval")} 秒，无需手动开启）'
+            )
+        else:
+            print(f'[WARN]  违停巡检未启动：{started.get("message")}')
+
     print(f'[INFO]  上传目录：{settings.upload_path}')
     print(f'[INFO]  上海路网接口已就绪（与视频源解耦）')
 
@@ -109,6 +137,10 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     yield
 
     # ---------------- 关闭 ----------------
+    # 巡检线程要显式收尾：它持有跟踪器与取流句柄，直接退进程会留下半截快照
+    if surveillance_service.surveillance.is_running():
+        surveillance_service.surveillance.stop()
+        print('[INFO]  违停巡检已停止')
     mongo.close()
     redis_client.close()
     print('[INFO]  已释放数据库连接')

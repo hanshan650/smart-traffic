@@ -391,7 +391,10 @@ export const surveillanceApi = {
   status: () => http.get<SurveillanceStatus>('/surveillance/status').then((r) => r.data),
 
   /**
-   * 开始巡检。
+   * 开始 / 恢复巡检。
+   *
+   * 巡检默认随后端启动自动开始，页面无需调用；这里只用于被暂停后恢复。
+   * 不传 `cameraIds` 时巡检范围取后端配置（留空则用视频源默认摄像头）。
    *
    * `hints` 用于声明点位名称（如「京港澳高速许昌服务区入口」）——
    * 名称含「服务区」「收费站」等关键词时该点位按可停车场所处理，不报违停。

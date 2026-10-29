@@ -3,7 +3,8 @@
   ====================
   把「一直盯着看」这件事的完整链路放在一屏：
 
-    启动巡检  →  逐轮抓帧分析  →  静止判定（多判据证据链）  →  告警  →  核查 / 查车主
+    自动巡检（服务启动即开始，无需手动）  →  逐轮抓帧分析
+    →  静止判定（多判据证据链）  →  告警  →  核查 / 查车主
 
   三个刻意的展示取向：
 
@@ -76,8 +77,6 @@ const lookupForm = ref({
 })
 const lookupResult = ref<StallAlert | null>(null)
 const ownerResult = ref<Awaited<ReturnType<typeof surveillanceApi.lookupOwner>> | null>(null)
-
-const cameraIdInput = ref('')
 
 let timer: number | undefined
 
@@ -182,24 +181,10 @@ async function changeAlertPageSize(): Promise<void> {
 async function start(): Promise<void> {
   busy.value = true
   try {
-    // 输入格式：编号，或「编号:点位名称」。名称里带「服务区」「收费站」
-    // 等关键词时该点位会被判定为可停车场所，不产生违停告警 ——
-    // 这是避免误报的关键信息，所以放在输入框里让部署者显式声明。
-    const ids: string[] = []
-    const hints: Record<string, string> = {}
-    for (const token of cameraIdInput.value.split(/[,\s]+/)) {
-      const text = token.trim()
-      if (!text) continue
-      const separator = text.indexOf(':')
-      if (separator > 0) {
-        const id = text.slice(0, separator).trim()
-        ids.push(id)
-        hints[id] = text.slice(separator + 1).trim()
-      } else {
-        ids.push(text)
-      }
-    }
-    const result = await surveillanceApi.start(ids, hints)
+    // 不带参数：巡检范围由后端按配置决定（SURVEILLANCE_CAMERAS，
+    // 留空则取当前视频源的默认摄像头）。正常情况下服务启动时就已经在跑，
+    // 这里只用于「被暂停后恢复」。
+    const result = await surveillanceApi.start()
     notify(result.message, 'ok')
     await refresh()
   } catch (error) {
@@ -337,15 +322,18 @@ onBeforeUnmount(() => {
       <div class="panel-title">
         <span>◈ 违停监控</span>
         <div class="head-actions">
-          <input
-            v-model="cameraIdInput"
-            class="input wide"
-            placeholder="编号，或 编号:点位名称（含“服务区”则豁免）"
-          />
-          <button v-if="!running" class="btn btn-sm btn-primary" :disabled="busy" @click="start">
-            ▶ 开始巡检
-          </button>
-          <button v-else class="btn btn-sm" :disabled="busy" @click="stop">■ 停止巡检</button>
+          <!-- 状态未知时不显示「已暂停」，否则后端不可达会被误读成巡检停了 -->
+          <span class="badge" :class="status && running ? 'tag-ok' : 'tag-faint'">
+            {{ !status ? '… 读取中' : running ? '● 自动巡检中' : '○ 已暂停' }}
+          </span>
+          <template v-if="status">
+            <button v-if="running" class="btn btn-sm" :disabled="busy" @click="stop">
+              ■ 暂停巡检
+            </button>
+            <button v-else class="btn btn-sm btn-primary" :disabled="busy" @click="start">
+              ▶ 恢复巡检
+            </button>
+          </template>
           <button class="btn btn-sm" @click="showAlgorithm = !showAlgorithm">
             {{ showAlgorithm ? '收起算法' : '⚙ 算法说明' }}
           </button>
@@ -360,10 +348,11 @@ onBeforeUnmount(() => {
       </div>
 
       <p class="hint">
-        巡检按轮次持续抓帧分析，<strong>使用真实墙钟时间</strong>判定静止时长 ——
+        服务启动即<strong>自动巡检</strong>，无需手动开启；按轮次持续抓帧分析，
+        <strong>使用真实墙钟时间</strong>判定静止时长 ——
         分批抓帧的轮次空档会被正确计入，30 秒阈值不会因帧率换算而失真。
         <span v-if="status && !running" class="warn-text">
-          当前未运行，不会产生新告警。
+          当前已暂停，不会产生新告警。
         </span>
       </p>
 
@@ -489,7 +478,7 @@ onBeforeUnmount(() => {
         </p>
 
         <div v-if="!running && !allVerdicts.length" class="empty">
-          巡检未运行。点击上方「开始巡检」后，这里会显示画面中各目标的静止时长与得分。
+          巡检已暂停。点击上方「恢复巡检」后，这里会显示画面中各目标的静止时长与得分。
         </div>
         <div v-else-if="!allVerdicts.length" class="empty">
           最近一轮未检测到符合条件的车辆
@@ -815,9 +804,6 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 8px;
   align-items: center;
-}
-.input.wide {
-  width: 260px;
 }
 .small {
   font-size: 12px;
