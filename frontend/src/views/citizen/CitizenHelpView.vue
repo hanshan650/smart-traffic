@@ -96,14 +96,14 @@ onMounted(async () => {
 }
 
 .alert-card {
-  background: #fef2f2;
-  border-color: #fecaca;
+  background: var(--c-danger-soft);
+  border-color: var(--c-danger-border);
 }
 .alert-text {
   margin: 0;
   font-size: var(--fs-base);
   line-height: 1.7;
-  color: #7f1d1d;
+  color: var(--c-danger-text);
 }
 .alert-text strong {
   color: var(--c-danger);

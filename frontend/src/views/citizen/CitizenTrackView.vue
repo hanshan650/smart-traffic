@@ -603,7 +603,7 @@ onMounted(() => {
 .c-btn.primary {
   background: var(--c-primary);
   border-color: var(--c-primary);
-  color: #fff;
+  color: var(--c-on-primary);
   font-weight: 600;
 }
 .c-btn:disabled {

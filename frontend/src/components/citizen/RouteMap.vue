@@ -21,17 +21,26 @@
      室内无信号），这时退回"看全省路况"，而不是把这一页变成错误页。
 -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 
-import { AMAP_STYLE_LIGHT, useAmap } from '@/composables/useAmap'
+import RoutePlanPanel from '@/components/citizen/RoutePlanPanel.vue'
+import { mapStyleFor, useAmap } from '@/composables/useAmap'
 import { useSystemStore } from '@/stores/system'
+import { useThemeStore } from '@/stores/theme'
 import { CITIZEN_CONGESTION_COLOR, CITIZEN_LEVEL_COLOR } from '@/types/citizen'
 import { formatDistance } from '@/utils/geo'
 import { hasPoint } from '@/utils/route'
+import {
+  eventsAlongRoute,
+  formatDuration,
+  projectOntoPath,
+  travelModeMeta,
+} from '@/utils/routePlan'
 import { relativeTime } from '@/utils/time'
 import type { GeoFix, GeoState } from '@/composables/useGeolocation'
 import type { PublicEvent, CongestionRankItem } from '@/types/citizen'
 import type { RouteContext } from '@/utils/route'
+import type { RoutePlan } from '@/utils/routePlan'
 
 const props = defineProps<{
   /** 用户位置（GCJ-02，已转换）。null = 尚未拿到 */
@@ -40,24 +49,69 @@ const props = defineProps<{
   geoMessage: string
   route: RouteContext
   rank: CongestionRankItem[]
+  /** 全部事件。规划出路线后要在这里面找"沿途"的那些 */
+  events: PublicEvent[]
   /** 可手动选择的路段名 */
   roads: string[]
   /** 数据是否来自演示源。true 时顶部常驻提示条 */
   demo?: boolean
+  /**
+   * 3D 视图开关。由页面持有而不是组件内部：
+   * 它决定了地图的渲染模式，列表视图切回来时不该被重置。
+   */
+  threeD?: boolean
 }>()
 
 const emit = defineEmits<{
   locate: []
   'select-road': [road: string]
+  /** 开关已打开但设备实际切不过去（WebGL 被禁用等），页面据此把开关复原 */
+  'three-d-unavailable': []
 }>()
 
 const systemStore = useSystemStore()
+const themeStore = useThemeStore()
 
-const { create, destroy, map, AMap, loading, error } = useAmap()
+const {
+  create,
+  destroy,
+  setMapStyle,
+  map,
+  AMap,
+  loading,
+  error,
+  viewSwitching,
+  switchViewMode,
+  setPitch,
+  setRotation,
+} = useAmap()
 
 const containerId = 'citizen-route-map'
 const amap = map
 const overlays = ref<any[]>([])
+
+/** 路线规划面板是否展开 */
+const plannerOpen = ref(false)
+
+/**
+ * 当前路线。`null` 表示没规划 —— 于是整页回到"我在哪条路上"的语义，
+ * 底部列表、编号标记、距离口径都跟着切回去。
+ *
+ * 用 `shallowRef` 而非 `ref`：一条跨城路线有上万个坐标点，`ref` 会为
+ * 每个点建一层响应式代理，纯属浪费 —— 这里只会在整体替换时更新。
+ */
+const plan = shallowRef<RoutePlan | null>(null)
+
+/**
+ * 路线图层单独存放。
+ *
+ * 事件图层每 30 秒随数据重画一次，路线跟着一起重画会闪，
+ * 而且每次重画都得重新 `setFitView`，用户刚缩放的视角会被抢走。
+ */
+let routeOverlays: any[] = []
+
+/** 3D 默认俯仰角：没有路线时按"开车看路"的视角给一个中间值 */
+const DEFAULT_3D_PITCH = 52
 
 /**
  * 是否跟随用户位置。
@@ -98,6 +152,52 @@ const statusColor = computed(() => {
 
 /** 本路段前方事件。分组规则集中在 utils/route.ts，这里不再过滤一遍 */
 const aheadList = computed(() => props.route.ahead)
+
+/**
+ * 底部列表 / 编号标记的数据源。
+ *
+ * 规划出路线后换成"沿途事件"，距离口径从**直线距离**变成**沿路里程** ——
+ * 这是路线规划带来的最大变化，不能只画一条线却继续显示直线距离。
+ * 归一成同一种形状，模板里就不用写两套判断。
+ */
+interface SheetEvent {
+  event: PublicEvent
+  distanceKm: number
+}
+
+const sheetEvents = computed<SheetEvent[]>(() => {
+  const current = plan.value
+  if (!current) {
+    return props.route.ahead.map((item) => ({ event: item.event, distanceKm: item.distanceKm }))
+  }
+
+  const meta = travelModeMeta(current.mode)
+  const along = eventsAlongRoute(props.events, current.path, meta.corridorM)
+
+  // 没有定位（或定位还没回来）时只能按"距路线起点"的里程显示
+  if (!props.fix) {
+    return along.map((item) => ({ event: item.event, distanceKm: item.alongKm }))
+  }
+
+  /*
+    距离必须从**当前所在位置**算，而不是从规划时的起点算。
+    否则车开出去十公里，列表还写着"约 12 公里"，越走越不对 ——
+    这是导航类界面最容易被立刻发现的一种错误。
+
+    先用用户位置在路线上的投影算出"我已经走了多远"，再相减。
+    用户离路线很远（还没上路、或已经绕开）时退回按起点算：
+    那种情况下投影点会被夹到路线端点，算出来的相对里程没有意义。
+  */
+  const mine = projectOntoPath(current.path, props.fix.lng, props.fix.lat)
+  if (!Number.isFinite(mine.offsetM) || mine.offsetM > meta.corridorM * 2) {
+    return along.map((item) => ({ event: item.event, distanceKm: item.alongKm }))
+  }
+
+  return along
+    .map((item) => ({ event: item.event, distanceKm: item.alongKm - mine.alongKm }))
+    // 已驶过的（留 50 米容差，避免刚经过就被抹掉）不再占"前方"的位置
+    .filter((item) => item.distanceKm >= -0.05)
+})
 
 /** 无坐标事件的数量，用于给出"有几条没显示在地图上"的说明 */
 const unlocatedCount = computed(() => props.route.unlocated.length)
@@ -247,6 +347,114 @@ function readPinStyle(): PinStyle {
 const MY_POSITION_HTML =
   '<div class="map-me"><span class="map-me-pulse"></span><span class="map-me-dot"></span></div>'
 
+/**
+ * 起终点圆形标记。
+ *
+ * 同样必须内联样式：高德会把 content 插到自己的容器里，
+ * scoped 样式带 data-v 属性选不中。
+ */
+function endpointHtml(text: string, color: string): string {
+  return (
+    '<div style="width:26px;height:26px;border-radius:50%;' +
+    `background:${color};color:#fff;display:flex;align-items:center;justify-content:center;` +
+    'font-size:13px;font-weight:700;font-family:system-ui,sans-serif;' +
+    'border:2px solid #fff;box-sizing:border-box;box-shadow:0 2px 8px rgba(15,23,42,.35);">' +
+    `${text}</div>`
+  )
+}
+
+function clearRoute(): void {
+  if (amap.value && routeOverlays.length) {
+    amap.value.remove(routeOverlays)
+  }
+  routeOverlays = []
+}
+
+/**
+ * 画路线。
+ *
+ * 两层折线（白色描边 + 彩色主线）而不是一条粗线：3D 下底图有建筑阴影，
+ * 单色线压在深色路面上会看不清边界，白色描边能稳定描出路线轮廓。
+ *
+ * `showDir` 必须开：俯仰之后"哪一头是终点"在视觉上完全看不出来，
+ * 方向箭头是这个视角下唯一可靠的前进指示。
+ */
+function drawRoute(): void {
+  if (!amap.value || !AMap.value) return
+  clearRoute()
+
+  const current = plan.value
+  if (!current) return
+
+  const meta = travelModeMeta(current.mode)
+  const path = current.path
+  if (path.length < 2) return
+
+  const casing = new AMap.value.Polyline({
+    path,
+    strokeColor: '#ffffff',
+    strokeWeight: 10,
+    strokeOpacity: 0.9,
+    lineJoin: 'round',
+    lineCap: 'round',
+    zIndex: 140,
+    clickable: false,
+  })
+
+  const line = new AMap.value.Polyline({
+    path,
+    strokeColor: meta.color,
+    strokeWeight: 6,
+    strokeOpacity: 0.95,
+    lineJoin: 'round',
+    lineCap: 'round',
+    zIndex: 141,
+    clickable: false,
+    showDir: true,
+    // 箭头颜色跟着主线走，否则在彩色线上会出现一圈突兀的白箭头
+    dirColor: meta.color,
+  })
+
+  const start = new AMap.value.Marker({
+    position: path[0],
+    content: endpointHtml('起', meta.color),
+    offset: new AMap.value.Pixel(-13, -13),
+    zIndex: 160,
+    clickable: false,
+  })
+
+  const end = new AMap.value.Marker({
+    position: path[path.length - 1],
+    content: endpointHtml('终', '#dc2626'),
+    offset: new AMap.value.Pixel(-13, -13),
+    zIndex: 160,
+    clickable: false,
+  })
+
+  routeOverlays = [casing, line, start, end]
+  amap.value.add(routeOverlays)
+}
+
+/**
+ * 视野框住整条路线。
+ *
+ * 3D 下先按出行方式设俯仰角再 fit：`setFitView` 会把俯仰因素一起算进可视范围，
+ * 顺序反了会得到一条"框住了但被压扁"的路线。
+ *
+ * `maxZoom` 给 17：短途路线（比如走到街对面）如果按"刚好填满屏幕"来算，
+ * 会放大到 19 级，底图只剩楼块轮廓。
+ */
+function focusPlan(): void {
+  const instance = amap.value
+  const current = plan.value
+  if (!instance || !current || !routeOverlays.length) return
+
+  // 带过渡：切换出行方式时镜头是"抬/落"到新角度，而不是瞬间跳过去
+  if (props.threeD) setPitch(travelModeMeta(current.mode).pitch, 520)
+
+  instance.setFitView?.(routeOverlays, false, [70, 40, 150, 40], 17)
+}
+
 function draw(): void {
   if (!amap.value || !AMap.value) return
   clearOverlays()
@@ -305,8 +513,9 @@ function draw(): void {
   })
 
   // ---- 3. 本路段事件：带编号的大标记，编号对应底部列表 ----
+  // 有路线时编号的是"沿途事件"，否则是"本路段前方事件"（见 sheetEvents）
   const pin = readPinStyle()
-  const numbered = aheadList.value
+  const numbered = sheetEvents.value
   numbered.forEach((item, index) => {
     const color = CITIZEN_LEVEL_COLOR[item.event.level] ?? '#64748b'
     const marker = new AMap.value.Marker({
@@ -322,22 +531,26 @@ function draw(): void {
   })
 
   // ---- 4. 其他事件：小空心点 ----
-  props.route.offRoute.forEach((item) => {
-    if (!isValidPoint(item.event.latitude, item.event.longitude)) return
-    const color = CITIZEN_LEVEL_COLOR[item.event.level] ?? '#64748b'
-    const marker = new AMap.value.CircleMarker({
-      center: [item.event.longitude as number, item.event.latitude as number],
-      radius: 8,
-      strokeColor: color,
-      strokeWeight: 2,
-      fillColor: '#ffffff',
-      fillOpacity: 0.85,
-      zIndex: 130,
-      cursor: 'pointer',
+  // 规划出路线后不再画：这一趟要去哪已经确定，把全城事件都堆上来
+  // 只会让路线本身难以辨认
+  if (!plan.value) {
+    props.route.offRoute.forEach((item) => {
+      if (!isValidPoint(item.event.latitude, item.event.longitude)) return
+      const color = CITIZEN_LEVEL_COLOR[item.event.level] ?? '#64748b'
+      const marker = new AMap.value.CircleMarker({
+        center: [item.event.longitude as number, item.event.latitude as number],
+        radius: 8,
+        strokeColor: color,
+        strokeWeight: 2,
+        fillColor: '#ffffff',
+        fillOpacity: 0.85,
+        zIndex: 130,
+        cursor: 'pointer',
+      })
+      marker.on('click', () => selectEvent(item.event, item.distanceKm, null))
+      all.push(marker)
     })
-    marker.on('click', () => selectEvent(item.event, item.distanceKm, null))
-    all.push(marker)
-  })
+  }
 
   // ---- 5. 我的位置：精度圈 + 光晕 + 实心点 ----
   if (props.fix) {
@@ -437,6 +650,9 @@ let enteredTracking = false
 function maybeEnterTracking(): void {
   if (enteredTracking || !amap.value || !props.fix) return
   centerOnUser(false)
+  // 3D 下把镜头转向行进方向，"往前看"才成立；
+  // heading 为 null（静止/不支持）时不要拿 0 顶上，那会把地图拧成正北
+  if (props.threeD && props.fix.heading !== null) setRotation(props.fix.heading)
   enteredTracking = true
 }
 
@@ -459,6 +675,66 @@ function onResize(): void {
   }, 200)
 }
 
+/** 每次重建都要重挂的事件（地图实例销毁后监听器不会自动保留） */
+function bindMapEvents(): void {
+  amap.value?.on?.('dragstart', () => {
+    following.value = false
+  })
+}
+
+/**
+ * 2D / 3D 切换。
+ *
+ * 重建、遮罩与抬头动画都在 `useAmap.switchViewMode` 里（三个页面共用），
+ * 这里只做页面级的两件事：重画覆盖物、重挂 dragstart；
+ * 以及把"3D 建不出来"回报给页面，让开关弹回去。
+ */
+let planFocusTimer: number | undefined
+
+async function applyViewMode(enabled: boolean): Promise<void> {
+  const pitch = enabled
+    ? plan.value
+      ? travelModeMeta(plan.value.mode).pitch
+      : DEFAULT_3D_PITCH
+    : 0
+
+  const ok = await switchViewMode(enabled ? '3D' : '2D', {
+    pitch,
+    draw: () => {
+      draw()
+      drawRoute()
+    },
+    after: () => {
+      bindMapEvents()
+      // 3D 下镜头跟着车头转；2D 重建后旋转已归零，无需处理
+      if (enabled && props.fix && props.fix.heading !== null) {
+        setRotation(props.fix.heading)
+      }
+    },
+  })
+
+  if (enabled && !ok) {
+    emit('three-d-unavailable')
+    if (plan.value) focusPlan()
+    return
+  }
+
+  /*
+    路线要在抬头动画结束后再框。
+    按平视（pitch=0）算出来的可视范围，倾斜后会偏 —— 远端被压缩、
+    近端出画面；等 650ms 的抬头动画走完再 setFitView，框出来的才是
+    用户最终看到的那一屏。
+  */
+  if (plan.value) {
+    if (enabled) {
+      if (planFocusTimer !== undefined) window.clearTimeout(planFocusTimer)
+      planFocusTimer = window.setTimeout(() => focusPlan(), 700)
+    } else {
+      focusPlan()
+    }
+  }
+}
+
 onMounted(async () => {
   if (!systemStore.config) {
     await systemStore.loadConfig()
@@ -468,14 +744,20 @@ onMounted(async () => {
     container: containerId,
     center: dataCenter.value,
     zoom: STREET_ZOOM,
-    mapStyle: AMAP_STYLE_LIGHT,
+    mapStyle: mapStyleFor(themeStore.tone),
     showTraffic: true,
+    // 3D 偏好可能来自上次访问（页面持久化），建图时就要按它来，
+    // 否则会先渲染一帧 2D 再跳成 3D
+    viewMode: props.threeD ? '3D' : '2D',
+    pitch: props.threeD
+      ? plan.value
+        ? travelModeMeta(plan.value.mode).pitch
+        : DEFAULT_3D_PITCH
+      : 0,
   })
 
   // 用户拖动地图就取消跟随
-  amap.value?.on?.('dragstart', () => {
-    following.value = false
-  })
+  bindMapEvents()
 
   // 视口尺寸变化后标记尺寸可能跨档（手机 ↔ 宽屏），需要重绘
   window.addEventListener('resize', onResize)
@@ -486,7 +768,7 @@ onMounted(async () => {
 })
 
 watch(
-  () => [props.rank, props.route, props.fix],
+  () => [props.rank, props.route, props.fix, props.events],
   () => {
     draw()
     maybeEnterTracking()
@@ -495,19 +777,61 @@ watch(
   { deep: false },
 )
 
+/**
+ * 路线变化：重画路线 + 重画事件图层（编号与空心点都换了一套）。
+ *
+ * 清除路线后主动把视野送回"我的位置"：路线没了还停在一个框着整条
+ * 路线的远景上，用户会以为自己掉出了覆盖范围。
+ */
+watch(plan, (current) => {
+  drawRoute()
+  draw()
+  if (current) {
+    focusPlan()
+  } else if (props.fix) {
+    centerOnUser()
+  } else {
+    fittedOnce = false
+    fitAll()
+  }
+})
+
+/**
+ * 3D 开关：只能重建地图（viewMode 是构造参数，见 `applyViewMode`）。
+ *
+ * 重建失败时会给页面发 `three-d-unavailable`，让开关自己弹回去 ——
+ * 一个"开着但没效果"的开关会让用户反复点，最后认定整页都是坏的。
+ */
+watch(
+  () => props.threeD,
+  (enabled) => {
+    void applyViewMode(enabled)
+  },
+)
+
+// 主题切换后底图必须一起换：高德样式与 CSS 变量是两套体系
+watch(
+  () => themeStore.tone,
+  (tone) => setMapStyle(mapStyleFor(tone)),
+)
+
 /** 位置持续更新时保持跟随（导航的基本预期） */
 watch(
   () => props.fix?.at,
   () => {
     if (following.value && props.fix) {
       amap.value?.setCenter?.([props.fix.lng, props.fix.lat])
+      // 3D 下镜头跟着车头转，否则"前方"会落到屏幕侧面
+      if (props.threeD && props.fix.heading !== null) setRotation(props.fix.heading)
     }
   },
 )
 
 onBeforeUnmount(() => {
   if (resizeTimer !== undefined) window.clearTimeout(resizeTimer)
+  if (planFocusTimer !== undefined) window.clearTimeout(planFocusTimer)
   window.removeEventListener('resize', onResize)
+  clearRoute()
   destroy()
 })
 
@@ -519,13 +843,38 @@ function onLocate(): void {
 
 function pickRoad(road: string): void {
   pickerOpen.value = false
+  // 手动选路段意味着"我不走这条规划路线了"，两条语义不能同时成立
+  plan.value = null
   emit('select-road', road)
+}
+
+function togglePlanner(): void {
+  plannerOpen.value = !plannerOpen.value
+  if (plannerOpen.value) pickerOpen.value = false
+}
+
+function togglePicker(): void {
+  pickerOpen.value = !pickerOpen.value
+  if (pickerOpen.value) plannerOpen.value = false
+}
+
+function onPlan(next: RoutePlan | null): void {
+  plan.value = next
 }
 </script>
 
 <template>
   <div class="map-wrap" :class="{ 'has-demo': demo }">
     <div :id="containerId" class="map-canvas" />
+
+    <!--
+      2D / 3D 重建时的过场遮罩。
+      地图实例必须先销毁再新建，中间有一小段容器是空的；
+      用一层底色淡入淡出把它盖住，看起来就是"视角转过去了"。
+    -->
+    <Transition name="map-fade">
+      <div v-if="viewSwitching" class="map-fade" />
+    </Transition>
 
     <!--
       演示数据提示。
@@ -538,7 +887,8 @@ function pickRoad(road: string): void {
       演示数据 · 非真实路况
     </div>
 
-    <div v-if="loading" class="map-mask">地图加载中…</div>
+    <!-- 切换 2D/3D 时由 map-fade 负责过场，不要再弹"加载地图" -->
+    <div v-if="loading && !viewSwitching" class="map-mask">地图加载中…</div>
     <div v-else-if="error" class="map-mask">
       <div class="mask-title">地图暂不可用</div>
       <div class="mask-detail">{{ error }}</div>
@@ -583,11 +933,19 @@ function pickRoad(road: string): void {
 
       <div class="topbar-actions">
         <button
+          class="icon-btn"
+          :class="{ active: plannerOpen }"
+          title="规划路线"
+          @click="togglePlanner"
+        >
+          ⇢
+        </button>
+        <button
           v-if="roads.length"
           class="icon-btn"
           :class="{ active: pickerOpen }"
           title="选择路段"
-          @click="pickerOpen = !pickerOpen"
+          @click="togglePicker"
         >
           ⇅
         </button>
@@ -601,6 +959,21 @@ function pickRoad(road: string): void {
         </button>
       </div>
     </div>
+
+    <!--
+      路线规划面板。
+      与路段选择器互斥展开：两者都是"我要看哪条路"的入口，
+      叠在一起会互相遮挡，而且同时存在时语义是冲突的。
+    -->
+    <RoutePlanPanel
+      v-if="plannerOpen"
+      :amap="AMap"
+      :fix="fix"
+      :plan="plan"
+      @plan="onPlan"
+      @locate="emit('locate')"
+      @close="plannerOpen = false"
+    />
 
     <!-- 路段选择器 -->
     <div v-if="pickerOpen" class="picker">
@@ -635,31 +1008,52 @@ function pickRoad(road: string): void {
     <div class="bottom-sheet" :class="{ collapsed: !listOpen }">
       <button class="sheet-head" @click="listOpen = !listOpen">
         <span class="sheet-title">
-          前方路况
-          <span v-if="aheadList.length" class="sheet-count">{{ aheadList.length }}</span>
+          {{ plan ? '沿途路况' : '前方路况' }}
+          <span v-if="sheetEvents.length" class="sheet-count">{{ sheetEvents.length }}</span>
         </span>
         <!--
           收起时直接给出最关键的一条，而不是只留一个标题。
           只看标题的话用户必须先展开才知道有没有事 —— 而"前面有没有事"
           正是这一页要回答的第一个问题。
         -->
-        <span v-if="!listOpen && aheadList.length" class="sheet-summary">
-          {{ aheadList[0].event.eventTypeLabel }} · {{ formatDistance(aheadList[0].distanceKm) }}
+        <span v-if="!listOpen && sheetEvents.length" class="sheet-summary">
+          {{ sheetEvents[0].event.eventTypeLabel }} ·
+          {{ formatDistance(sheetEvents[0].distanceKm) }}
         </span>
         <span v-else-if="!listOpen" class="sheet-summary muted">暂无事件</span>
         <span class="sheet-chevron">{{ listOpen ? '▾' : '▴' }}</span>
       </button>
 
       <div v-show="listOpen" class="sheet-body">
-        <div v-if="!aheadList.length" class="sheet-empty">
-          <span v-if="!hasFix">开启定位后显示你前方的事件</span>
+        <!--
+          路线摘要。
+          地图上已经画了线，这里只补"多远、多久、哪种方式" ——
+          路线本身不重复叙述，底部列表留给"沿途有什么"。
+        -->
+        <div
+          v-if="plan"
+          class="plan-bar"
+          :style="{ borderLeftColor: travelModeMeta(plan.mode).color }"
+        >
+          <span class="plan-mode" :style="{ color: travelModeMeta(plan.mode).color }">
+            {{ travelModeMeta(plan.mode).label }}
+          </span>
+          <span class="plan-dest">{{ plan.destinationName }}</span>
+          <span class="plan-meta">
+            {{ formatDistance(plan.distanceM / 1000) }} · {{ formatDuration(plan.durationS) }}
+          </span>
+        </div>
+
+        <div v-if="!sheetEvents.length" class="sheet-empty">
+          <span v-if="plan">这条路线沿途暂无事件</span>
+          <span v-else-if="!hasFix">开启定位后显示你前方的事件</span>
           <span v-else-if="!route.currentRoad">请先选择要查看的路段</span>
           <span v-else>当前路段前方暂无事件</span>
         </div>
 
         <ul v-else class="event-list">
           <li
-            v-for="(item, index) in aheadList"
+            v-for="(item, index) in sheetEvents"
             :key="index"
             class="event-row"
             @click="selectEvent(item.event, item.distanceKm, index + 1)"
@@ -680,8 +1074,8 @@ function pickRoad(road: string): void {
           </li>
         </ul>
 
-        <!-- 其他路段的最近事件：给个参考，不抢主体 -->
-        <div v-if="route.offRoute.length" class="other-block">
+        <!-- 其他路段的最近事件：给个参考，不抢主体。有路线时这一趟已经确定，不再罗列 -->
+        <div v-if="!plan && route.offRoute.length" class="other-block">
           <div class="other-title">附近其他路段</div>
           <ul class="other-list">
             <li
@@ -709,11 +1103,17 @@ function pickRoad(road: string): void {
         </p>
 
         <!--
-          距离口径必须写清楚。写成"前方 3.2 公里"会让人以为是导航软件
-          那种沿路里程，而这里只有直线距离可用（没有路网几何）。
+          距离口径必须写清楚。没有路线时是直线距离，有路线时是沿路投影 ——
+          两种数字看起来一样，含义完全不同，混着写等于什么都没说。
         -->
         <p class="sheet-note">
-          距离为两点间直线估算，非沿路里程；点位精度约百米
+          <template v-if="plan">
+            距离为沿规划路线投影估算，横向
+            {{ travelModeMeta(plan.mode).corridorM }} 米内视为沿途；未计入实时拥堵绕行
+          </template>
+          <template v-else>
+            距离为两点间直线估算，非沿路里程；点位精度约百米
+          </template>
         </p>
       </div>
     </div>
@@ -839,6 +1239,23 @@ function pickRoad(road: string): void {
   z-index: 0;
 }
 
+/* 2D/3D 重建的过场遮罩：盖住地图，但压在顶部卡与底部列表之下 */
+.map-fade {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  background: var(--c-surface);
+  pointer-events: all;
+}
+.map-fade-enter-active,
+.map-fade-leave-active {
+  transition: opacity 0.16s ease;
+}
+.map-fade-enter-from,
+.map-fade-leave-to {
+  opacity: 0;
+}
+
 .map-mask {
   position: absolute;
   inset: 0;
@@ -886,7 +1303,7 @@ function pickRoad(road: string): void {
   /* 内外边距都随视口连续变，不再随断点跳变 */
   padding: clamp(6px, 0.4vw + 4.4px, 10px) clamp(9px, 0.5vw + 7px, 13px);
   border-radius: clamp(9px, 0.4vw + 7.4px, 12px);
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--c-overlay);
   backdrop-filter: blur(6px);
   box-shadow: 0 2px 14px rgba(15, 23, 42, 0.18);
 }
@@ -956,7 +1373,7 @@ function pickRoad(road: string): void {
   place-items: center;
   border: none;
   border-radius: clamp(9px, 0.4vw + 7.4px, 12px);
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--c-overlay);
   backdrop-filter: blur(6px);
   box-shadow: 0 2px 14px rgba(15, 23, 42, 0.18);
   color: var(--c-text-dim);
@@ -987,7 +1404,7 @@ function pickRoad(road: string): void {
   display: flex;
   flex-direction: column;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.97);
+  background: var(--c-overlay);
   backdrop-filter: blur(6px);
   box-shadow: 0 4px 18px rgba(15, 23, 42, 0.22);
   overflow: hidden;
@@ -1044,7 +1461,7 @@ function pickRoad(road: string): void {
   width: min(300px, calc(100% - 20px));
   padding: 11px 13px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.97);
+  background: var(--c-overlay);
   backdrop-filter: blur(6px);
   box-shadow: 0 4px 18px rgba(15, 23, 42, 0.22);
   z-index: 15;
@@ -1095,7 +1512,7 @@ function pickRoad(road: string): void {
   display: flex;
   flex-direction: column;
   border-radius: 16px 16px 0 0;
-  background: rgba(255, 255, 255, 0.97);
+  background: var(--c-overlay);
   backdrop-filter: blur(8px);
   box-shadow: 0 -3px 20px rgba(15, 23, 42, 0.2);
   z-index: 13;
@@ -1158,6 +1575,40 @@ function pickRoad(road: string): void {
   padding: 0 14px 12px;
   overflow-y: auto;
 }
+
+/*
+  路线摘要条。
+  左侧色条与地图上的线同色，用户不必读文字就能确认"这条摘要对应那条线"。
+*/
+.plan-bar {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  border-left: 3px solid var(--c-primary);
+  border-radius: 7px;
+  background: var(--c-surface-2);
+  font-size: var(--fs-sm);
+}
+.plan-mode {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+.plan-dest {
+  flex: 1;
+  min-width: 0;
+  color: var(--c-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-meta {
+  flex: 0 0 auto;
+  color: var(--c-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
 .sheet-empty {
   padding: 8px 0 10px;
   font-size: var(--fs-sm);

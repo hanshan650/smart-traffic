@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "type-check": "vue-tsc --noEmit",
     "verify:route": "esbuild src/utils/geo.ts --bundle --format=esm --alias:@=./src --outfile=scripts/.tmp/geo.mjs --log-level=error && esbuild src/utils/route.ts --bundle --format=esm --alias:@=./src --outfile=scripts/.tmp/route.mjs --log-level=error && node scripts/verify_route.mjs",
+    "verify:plan": "esbuild src/utils/geo.ts --bundle --format=esm --alias:@=./src --outfile=scripts/.tmp/geo.mjs --log-level=error && esbuild src/utils/routePlan.ts --bundle --format=esm --alias:@=./src --outfile=scripts/.tmp/routePlan.mjs --log-level=error && node scripts/verify_route_plan.mjs",
     "verify:pwa": "..\\backend\\.venv\\Scripts\\python.exe scripts\\verify_pwa.py"
   },
   "dependencies": {

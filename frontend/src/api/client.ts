@@ -70,12 +70,18 @@ http.interceptors.response.use(
       }
     }
 
-    // FastAPI 把 HTTPException 的 detail 放在 detail 字段
-    const detail = (body as unknown as { detail?: ApiErrorBody } | undefined)?.detail
+    // FastAPI 的 detail 可能是结构化对象（本项目多数接口），也可能是字符串
+    // （如运行时配置保存的 403）。两种都要提取，否则页面只剩通用 Axios 文案。
+    const detail = (body as unknown as { detail?: ApiErrorBody | string } | undefined)?.detail
+    const structured = typeof detail === 'object' && detail !== null ? detail : undefined
 
     const message =
-      detail?.error || body?.error || error.message || '请求失败，请稍后重试'
-    const hint = detail?.hint || body?.hint || ''
+      (typeof detail === 'string' ? detail : '') ||
+      structured?.error ||
+      body?.error ||
+      error.message ||
+      '请求失败，请稍后重试'
+    const hint = structured?.hint || body?.hint || ''
 
     return Promise.reject(new ApiError(message, status, hint))
   },

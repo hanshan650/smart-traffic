@@ -135,7 +135,7 @@ onMounted(load)
 
 .intro-card {
   background: var(--c-primary-soft);
-  border-color: #bfdbfe;
+  border-color: var(--c-primary-border);
 }
 .disclaimer {
   margin: 0;
@@ -143,7 +143,7 @@ onMounted(load)
   color: var(--c-text-dim);
   line-height: 1.7;
   padding-top: 9px;
-  border-top: 1px dashed #bfdbfe;
+  border-top: 1px dashed var(--c-primary-border);
 }
 
 .placeholder,
@@ -177,8 +177,8 @@ onMounted(load)
 .error-box {
   color: var(--c-danger);
   font-size: var(--fs-base);
-  background: #fef2f2;
-  border-color: #fecaca;
+  background: var(--c-danger-soft);
+  border-color: var(--c-danger-border);
 }
 
 /* ---------------------------------------------------------------- 列表 */

@@ -12,16 +12,24 @@
   · 删除需二次确认：警员是主数据，误删会影响派警可用性
 -->
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { officerApi } from '@/api'
 import { describeError } from '@/api/client'
+import { on as onRealtime } from '@/composables/useWebSocket'
 import {
   OFFICER_SKILL_LABEL,
   OFFICER_STATUS_COLOR,
   OFFICER_STATUS_LABEL,
 } from '@/types/api'
-import type { Officer, OfficerSkill, OfficerStats, OfficerStatus } from '@/types/api'
+import type {
+  Officer,
+  OfficerSkill,
+  OfficerStats,
+  OfficerStatus,
+  OfficerUpdateEvent,
+} from '@/types/api'
+import { getCurrentLocation } from '@/utils/locationPermission'
 
 const STATUS_OPTIONS: OfficerStatus[] = ['on_duty', 'busy', 'off_duty', 'leave']
 const SKILL_OPTIONS: OfficerSkill[] = [
@@ -36,8 +44,10 @@ const officers = ref<Officer[]>([])
 const stats = ref<OfficerStats | null>(null)
 const loading = ref(false)
 const busy = ref(false)
+const locating = ref('')
 const message = ref('')
 const messageTone = ref<'ok' | 'warn' | 'danger'>('ok')
+let offOfficerLocation: (() => void) | undefined
 
 // 筛选
 const filterStatus = ref('')
@@ -66,10 +76,11 @@ const summaryCards = computed(() => {
   const data = stats.value
   return [
     { label: '警员总数', value: data?.total ?? 0, color: 'var(--accent)' },
-    { label: '在岗可派', value: data?.onDuty ?? 0, color: '#10b981' },
-    { label: '出警中', value: data?.busy ?? 0, color: '#facc15' },
-    { label: '下班', value: data?.offDuty ?? 0, color: '#64748b' },
-    { label: '请假', value: data?.leave ?? 0, color: '#f97316' },
+    { label: '在岗可派', value: data?.onDuty ?? 0, color: 'var(--ok)' },
+    { label: '出警中', value: data?.busy ?? 0, color: 'var(--warn)' },
+    { label: '下班', value: data?.offDuty ?? 0, color: 'var(--text-dim)' },
+    { label: '请假', value: data?.leave ?? 0, color: 'var(--orange)' },
+    { label: '定位活跃', value: data?.locationActive ?? 0, color: 'var(--accent)' },
   ]
 })
 
@@ -94,6 +105,62 @@ async function load(): Promise<void> {
     notify(describeError(error).message, 'danger')
   } finally {
     loading.value = false
+  }
+}
+
+function lastSeenText(value?: string | null): string {
+  if (!value) return '未上报'
+  const timestamp = new Date(value).getTime()
+  if (!Number.isFinite(timestamp)) return '时间未知'
+  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000))
+  if (seconds < 60) return '刚刚'
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前`
+  return new Date(timestamp).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+/** 表单内取一次当前位置。权限提示由浏览器负责，坐标已转换为 GCJ-02 */
+async function fillFormLocation(): Promise<void> {
+  locating.value = 'form'
+  try {
+    const location = await getCurrentLocation()
+    if (!location.ok) {
+      notify(location.message, 'warn')
+      return
+    }
+    form.value.latitude = Number(location.latitude.toFixed(6))
+    form.value.longitude = Number(location.longitude.toFixed(6))
+    notify(`已填入当前位置（精度 ±${Math.round(location.accuracy)} m），保存后生效`, 'ok')
+  } finally {
+    locating.value = ''
+  }
+}
+
+/** 表格行直接上报位置，不修改其他档案字段；后端会广播实时位置 */
+async function reportLocation(officer: Officer): Promise<void> {
+  locating.value = officer.officerId
+  try {
+    const location = await getCurrentLocation()
+    if (!location.ok) {
+      notify(location.message, 'warn')
+      return
+    }
+    const updated = await officerApi.updateLocation(officer.officerId, {
+      latitude: Number(location.latitude.toFixed(6)),
+      longitude: Number(location.longitude.toFixed(6)),
+      accuracy: Math.round(location.accuracy),
+      source: 'browser',
+    })
+    const index = officers.value.findIndex((item) => item.officerId === updated.officerId)
+    if (index >= 0) officers.value[index] = updated
+    stats.value = await officerApi.stats()
+    notify(`已上报 ${updated.name || updated.officerId} 的当前位置`, 'ok')
+  } catch (error) {
+    notify(describeError(error).message, 'danger')
+  } finally {
+    locating.value = ''
   }
 }
 
@@ -196,7 +263,39 @@ async function seed(): Promise<void> {
   }
 }
 
-onMounted(load)
+function applyRealtimeLocation(payload: OfficerUpdateEvent): void {
+  const index = officers.value.findIndex((item) => item.officerId === payload.officerId)
+  if (index >= 0) {
+    officers.value[index] = {
+      ...officers.value[index],
+      latitude: payload.latitude,
+      longitude: payload.longitude,
+      status: payload.status,
+      locationAccuracy: payload.accuracy,
+      locationSource: payload.source,
+      lastSeen: payload.lastSeen,
+    }
+  }
+  officerApi
+    .stats()
+    .then((overview) => {
+      stats.value = overview
+    })
+    .catch(() => {
+      // 列表已更新，统计失败时保留上一次值
+    })
+}
+
+onMounted(() => {
+  void load()
+  offOfficerLocation = onRealtime('officer:update', (payload) => {
+    applyRealtimeLocation(payload as OfficerUpdateEvent)
+  })
+})
+
+onBeforeUnmount(() => {
+  offOfficerLocation?.()
+})
 </script>
 
 <template>
@@ -270,7 +369,7 @@ onMounted(load)
               <th>专长</th>
               <th class="num">在办</th>
               <th class="num">平均响应</th>
-              <th>坐标</th>
+              <th>坐标 / 最近定位</th>
               <th class="num">操作</th>
             </tr>
           </thead>
@@ -293,10 +392,19 @@ onMounted(load)
               </td>
               <td class="num mono" :class="{ hot: item.activeCases > 0 }">{{ item.activeCases }}</td>
               <td class="num mono">{{ item.avgResponseMinutes }}m</td>
-              <td class="mono text-faint small">
-                {{ item.latitude.toFixed(3) }}, {{ item.longitude.toFixed(3) }}
+              <td class="mono text-faint small coordinate-cell">
+                <div>{{ item.latitude.toFixed(5) }}, {{ item.longitude.toFixed(5) }}</div>
+                <div>{{ lastSeenText(item.lastSeen) }}</div>
               </td>
-              <td class="num">
+              <td class="num actions-cell">
+                <button
+                  class="btn btn-sm"
+                  :disabled="locating === item.officerId"
+                  title="用浏览器当前位置更新该警员定位"
+                  @click="reportLocation(item)"
+                >
+                  {{ locating === item.officerId ? '定位中…' : '⌖ 定位' }}
+                </button>
                 <button class="btn btn-sm" @click="openEdit(item)">编辑</button>
                 <button class="btn btn-sm danger" @click="remove(item)">删除</button>
               </td>
@@ -345,12 +453,25 @@ onMounted(load)
           </label>
           <label class="field">
             <span>纬度</span>
-            <input v-model.number="form.latitude" type="number" step="0.0001" class="input" />
+            <input v-model.number="form.latitude" type="number" step="0.000001" class="input" />
           </label>
           <label class="field">
             <span>经度</span>
-            <input v-model.number="form.longitude" type="number" step="0.0001" class="input" />
+            <input v-model.number="form.longitude" type="number" step="0.000001" class="input" />
           </label>
+          <div class="field block location-row">
+            <button
+              type="button"
+              class="btn btn-sm"
+              :disabled="locating === 'form'"
+              @click="fillFormLocation"
+            >
+              {{ locating === 'form' ? '定位中…' : '⌖ 使用当前位置' }}
+            </button>
+            <span class="text-faint small">
+              浏览器会请求定位权限；坐标转换后填入上方，保存后写库并实时推送。
+            </span>
+          </div>
           <label class="field">
             <span>在办案件数</span>
             <input v-model.number="form.activeCases" type="number" min="0" class="input" />
@@ -552,6 +673,20 @@ onMounted(load)
 }
 .field.block {
   margin-top: 12px;
+}
+.form-grid .field.block {
+  grid-column: 1 / -1;
+}
+.location-row {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  margin-top: 0;
+}
+.coordinate-cell div:last-child {
+  margin-top: 2px;
+  color: var(--text-faint);
+  font-size: 11px;
 }
 .skills {
   display: flex;

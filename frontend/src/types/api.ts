@@ -526,6 +526,12 @@ export interface Officer {
   totalHandled: number
   avgResponseMinutes: number
   note: string
+  /** 最近一次位置上报的精度（米） */
+  locationAccuracy?: number
+  /** browser / device / manual */
+  locationSource?: string
+  /** 最近一次位置上报时间（服务端时间） */
+  lastSeen?: string | null
   createdAt?: string | null
   updatedAt?: string | null
 }
@@ -543,6 +549,25 @@ export interface OfficerStats {
   offDuty: number
   leave: number
   byUnit: Record<string, number>
+  /** 有有效坐标的人数 */
+  withLocation: number
+  /** 最近窗口内上报过位置的人数 */
+  locationActive: number
+  /** 活跃窗口（秒），由后端下发，避免前后端写死不同阈值 */
+  locationActiveWindow: number
+}
+
+/** ``officer:update`` WebSocket 负载 */
+export interface OfficerUpdateEvent {
+  officerId: string
+  name: string
+  unit: string
+  status: OfficerStatus
+  latitude: number
+  longitude: number
+  accuracy: number
+  source: string
+  lastSeen: string | null
 }
 
 // ==========================================================================
@@ -841,7 +866,14 @@ export interface LookupAuditEntry {
 // WebSocket
 // ==========================================================================
 
-export type WsChannel = 'event:new' | 'event:update' | 'snapshot' | 'health' | 'pong' | 'echo'
+export type WsChannel =
+  | 'event:new'
+  | 'event:update'
+  | 'snapshot'
+  | 'officer:update'
+  | 'health'
+  | 'pong'
+  | 'echo'
 
 export interface WsMessage<T = unknown> {
   channel: WsChannel | string

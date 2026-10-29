@@ -98,7 +98,7 @@ export default defineConfig({
       记得局域网里任何人都能访问 /api（含 AMAP Key 的运行时配置）。
     */
     host: true,
-    port: 5173,
+    port: 5174,
     proxy: {
       // WebSocket 实时推送。
       // 注意：**必须放在 '/api' 之前** —— Vite 按声明顺序匹配，

@@ -158,9 +158,9 @@ npm run dev
 
 | 入口 | 地址 |
 |------|------|
-| 警务端 | <http://localhost:5173/dashboard> |
-| 民众端 | <http://localhost:5173/citizen> |
-| 指挥大屏 | <http://localhost:5173/screen> |
+| 警务端 | <http://localhost:5174/dashboard> |
+| 民众端 | <http://localhost:5174/citizen> |
+| 指挥大屏 | <http://localhost:5174/screen> |
 
 ---
 
@@ -421,10 +421,10 @@ OCR 可读下限约 16 px。因此实现了**几何预检**，读不出时返回
 
 ```powershell
 # 手机开「开发者选项 → USB 调试」（ColorOS/vivo 系还需开「USB 调试（安全设置）」）
-adb reverse tcp:5173 tcp:5173
+adb reverse tcp:5174 tcp:5174
 ```
 
-然后手机浏览器打开 `http://127.0.0.1:5173/citizen` —— 走 `localhost`
+然后手机浏览器打开 `http://127.0.0.1:5174/citizen` —— 走 `localhost`
 即为安全上下文，定位与 PWA 安装都可用。
 
 > **方向极易搞反**：`adb forward` 是「电脑 → 手机」，`adb reverse` 才是
@@ -505,11 +505,14 @@ adb reverse tcp:5173 tcp:5173
 |------|------|------|
 | GET | `/api/v1/officers` | 警员列表 |
 | POST | `/api/v1/officers` | 新增警员 |
-| GET | `/api/v1/officers/stats` | 勤务概览 |
+| GET | `/api/v1/officers/stats` | 勤务概览（含定位活跃人数） |
 | POST | `/api/v1/officers/seed` | 导入示例警员 |
 | GET | `/api/v1/officers/{id}` | 警员详情 |
 | PUT | `/api/v1/officers/{id}` | 更新警员 |
+| PUT | `/api/v1/officers/{id}/location` | 上报警员实时位置（GCJ-02） |
 | DELETE | `/api/v1/officers/{id}` | 删除警员 |
+
+位置更新后通过 WebSocket `officer:update` 广播，仪表盘统计、警员页与地图警员图层同步刷新。浏览器定位权限封装在 `frontend/src/utils/locationPermission.ts`，后续接入终端定位时只需替换该实现。
 
 ### 警情调度
 

@@ -460,7 +460,7 @@ function goTrack(): void {
   border: none;
   border-radius: 12px;
   background: var(--c-primary);
-  color: #fff;
+  color: var(--c-on-primary);
   font-size: var(--fs-md);
   font-weight: 600;
   cursor: pointer;
@@ -490,8 +490,8 @@ function goTrack(): void {
 .error-box {
   color: var(--c-danger);
   font-size: var(--fs-base);
-  background: #fef2f2;
-  border-color: #fecaca;
+  background: var(--c-danger-soft);
+  border-color: var(--c-danger-border);
 }
 
 .c-btn {
@@ -510,7 +510,7 @@ function goTrack(): void {
 .c-btn.primary {
   background: var(--c-primary);
   border-color: var(--c-primary);
-  color: #fff;
+  color: var(--c-on-primary);
   font-weight: 600;
 }
 .c-btn:disabled {
@@ -530,7 +530,7 @@ function goTrack(): void {
   margin: 0 auto 12px;
   border-radius: 50%;
   background: var(--c-ok);
-  color: #fff;
+  color: var(--c-on-primary);
   font-size: var(--fs-xl);
   display: grid;
   place-items: center;

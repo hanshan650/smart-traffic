@@ -56,6 +56,16 @@ const expanded = ref<Record<string, boolean>>({})
 const showAlgorithm = ref(false)
 const activeTab = ref<'verdicts' | 'alerts' | 'owner' | 'audits'>('verdicts')
 
+type AlertFilters = { cameraId: string; status: string; startTime: string; endTime: string }
+const blankAlertFilters = (): AlertFilters => ({ cameraId: '', status: '', startTime: '', endTime: '' })
+const alertFilters = ref<AlertFilters>(blankAlertFilters())
+const activeAlertFilters = ref<AlertFilters>(blankAlertFilters())
+const alertTotal = ref(0)
+const alertPage = ref(1)
+const alertPageSize = ref(10)
+const alertLoading = ref(false)
+const alertError = ref('')
+
 // 车主查询表单
 const lookupForm = ref({
   plate: '',
@@ -72,13 +82,15 @@ const cameraIdInput = ref('')
 let timer: number | undefined
 
 const running = computed(() => status.value?.running ?? false)
+const alertTotalPages = computed(() => Math.max(1, Math.ceil(alertTotal.value / alertPageSize.value)))
+const hasAlertFilters = computed(() => Object.values(activeAlertFilters.value).some(Boolean))
 
 const summaryCards = computed(() => [
-  { label: '巡检状态', value: running.value ? '运行中' : '已停止', color: running.value ? '#10b981' : '#64748b' },
+  { label: '巡检状态', value: running.value ? '运行中' : '已停止', color: running.value ? 'var(--ok)' : 'var(--text-dim)' },
   { label: '巡检路数', value: status.value?.totals.cameras ?? 0, color: 'var(--accent)' },
-  { label: '累计轮次', value: status.value?.totals.rounds ?? 0, color: '#22d3ee' },
-  { label: '分析帧数', value: status.value?.totals.framesAnalyzed ?? 0, color: '#22d3ee' },
-  { label: '违停告警', value: alertStats.value.total, color: '#ef4444' },
+  { label: '累计轮次', value: status.value?.totals.rounds ?? 0, color: 'var(--accent)' },
+  { label: '分析帧数', value: status.value?.totals.framesAnalyzed ?? 0, color: 'var(--accent)' },
+  { label: '违停告警', value: alertStats.value.total, color: 'var(--danger)' },
 ])
 
 /** 当前所有路里最近一轮的判定，按静止时长降序 */
@@ -100,19 +112,71 @@ function notify(text: string, tone: 'ok' | 'warn' | 'danger' = 'ok'): void {
   }, 4500)
 }
 
+async function loadAlerts(): Promise<void> {
+  alertLoading.value = true
+  alertError.value = ''
+  const filters = activeAlertFilters.value
+  try {
+    const result = await surveillanceApi.alerts({
+      page: alertPage.value,
+      pageSize: alertPageSize.value,
+      cameraId: filters.cameraId || undefined,
+      status: filters.status || undefined,
+      startTime: filters.startTime ? new Date(filters.startTime).toISOString() : undefined,
+      endTime: filters.endTime ? new Date(filters.endTime).toISOString() : undefined,
+    })
+    alerts.value = result.items
+    alertTotal.value = result.total
+  } catch (error) {
+    alertError.value = describeError(error).message
+  } finally {
+    alertLoading.value = false
+  }
+}
+
 async function refresh(): Promise<void> {
   try {
-    const [state, alertList, stats] = await Promise.all([
+    const [state, stats] = await Promise.all([
       surveillanceApi.status(),
-      surveillanceApi.alerts({ limit: 30 }),
       surveillanceApi.alertStats(),
+      loadAlerts(),
     ])
     status.value = state
-    alerts.value = alertList.items
     alertStats.value = stats
-  } catch (error) {
+  } catch {
     // 轮询失败不弹提示，避免巡检停止时刷屏
   }
+}
+
+async function applyAlertFilters(): Promise<void> {
+  const start = alertFilters.value.startTime ? new Date(alertFilters.value.startTime).getTime() : 0
+  const end = alertFilters.value.endTime ? new Date(alertFilters.value.endTime).getTime() : 0
+  if (start && end && start > end) {
+    notify('开始时间不能晚于结束时间', 'warn')
+    return
+  }
+  activeAlertFilters.value = { ...alertFilters.value }
+  alertPage.value = 1
+  await loadAlerts()
+}
+
+async function resetAlertFilters(): Promise<void> {
+  alertFilters.value = blankAlertFilters()
+  activeAlertFilters.value = blankAlertFilters()
+  alertPage.value = 1
+  await loadAlerts()
+}
+
+async function changeAlertPage(page: number): Promise<void> {
+  const next = Math.min(Math.max(1, page), alertTotalPages.value)
+  if (next === alertPage.value) return
+  alertPage.value = next
+  await loadAlerts()
+}
+
+async function changeAlertPageSize(): Promise<void> {
+  alertPage.value = 1
+  await loadAlerts()
 }
 
 async function start(): Promise<void> {
@@ -404,7 +468,7 @@ onBeforeUnmount(() => {
         <button
           v-for="item in [
             { key: 'verdicts', label: `实时判定 (${allVerdicts.length})` },
-            { key: 'alerts', label: `违停告警 (${alerts.length})` },
+            { key: 'alerts', label: `违停告警 (${alertTotal})` },
             { key: 'owner', label: '车主查询' },
             { key: 'audits', label: `审计留痕 (${audits.length})` },
           ]"
@@ -466,12 +530,52 @@ onBeforeUnmount(() => {
 
       <!-- 告警列表 -->
       <div v-else-if="activeTab === 'alerts'">
-        <div v-if="!alerts.length" class="empty">
-          暂无违停告警。车辆在非可停车地点静止超过
-          {{ algorithm?.detection.config.stallSeconds ?? 30 }} 秒时会在此出现。
+        <form class="alert-filters" @submit.prevent="applyAlertFilters">
+          <label>
+            <span>摄像头编号</span>
+            <input v-model.trim="alertFilters.cameraId" class="input" placeholder="全部摄像头" />
+          </label>
+          <label>
+            <span>处置状态</span>
+            <select v-model="alertFilters.status" class="select">
+              <option value="">全部状态</option>
+              <option value="pending">待核验</option>
+              <option value="verified">已确认</option>
+              <option value="dismissed">误报</option>
+              <option value="handled">已处置</option>
+            </select>
+          </label>
+          <label>
+            <span>开始时间</span>
+            <input v-model="alertFilters.startTime" type="datetime-local" class="input" />
+          </label>
+          <label>
+            <span>结束时间</span>
+            <input v-model="alertFilters.endTime" type="datetime-local" class="input" />
+          </label>
+          <div class="filter-actions">
+            <button type="submit" class="btn btn-sm btn-primary" :disabled="alertLoading">查询</button>
+            <button type="button" class="btn btn-sm" :disabled="alertLoading" @click="resetAlertFilters">
+              重置
+            </button>
+          </div>
+        </form>
+
+        <div class="alert-list-meta">
+          <span>共 <b>{{ alertTotal }}</b> 条，当前第 {{ alertPage }} / {{ alertTotalPages }} 页</span>
+          <span v-if="alertLoading">正在刷新…</span>
+        </div>
+        <div v-if="alertError" class="watch-error" role="alert">{{ alertError }}</div>
+
+        <div v-if="!alerts.length && !alertLoading" class="empty">
+          <template v-if="hasAlertFilters">没有符合当前筛选条件的违停告警，可调整条件后重试。</template>
+          <template v-else>
+            暂无违停告警。车辆在非可停车地点静止超过
+            {{ algorithm?.detection.config.stallSeconds ?? 30 }} 秒时会在此出现。
+          </template>
         </div>
 
-        <div v-else class="alert-list">
+        <div v-else-if="alerts.length" class="alert-list">
           <div v-for="alert in alerts" :key="alert.id" class="alert-card">
             <div class="alert-head" @click="expanded[alert.id] = !expanded[alert.id]">
               <span class="tag" :style="{ color: ALERT_STATUS_COLOR[alert.status] }">
@@ -548,6 +652,33 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </div>
+        </div>
+
+        <div v-if="alertTotal" class="pagination">
+          <button
+            class="btn btn-sm"
+            :disabled="alertLoading || alertPage <= 1"
+            @click="changeAlertPage(alertPage - 1)"
+          >
+            上一页
+          </button>
+          <span class="mono">{{ alertPage }} / {{ alertTotalPages }}</span>
+          <button
+            class="btn btn-sm"
+            :disabled="alertLoading || alertPage >= alertTotalPages"
+            @click="changeAlertPage(alertPage + 1)"
+          >
+            下一页
+          </button>
+          <label>
+            每页
+            <select v-model.number="alertPageSize" class="select" @change="changeAlertPageSize">
+              <option :value="10">10</option>
+              <option :value="20">20</option>
+              <option :value="50">50</option>
+            </select>
+            条
+          </label>
         </div>
       </div>
 
@@ -896,6 +1027,53 @@ onBeforeUnmount(() => {
 
 /* ---------------------------------------------------------------- 告警卡 */
 
+.alert-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+  gap: 10px;
+  align-items: end;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.alert-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+.filter-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.alert-list-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 10px 0;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+.alert-list-meta b {
+  color: var(--text);
+}
+.pagination {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+.pagination label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .alert-list {
   display: flex;
   flex-direction: column;

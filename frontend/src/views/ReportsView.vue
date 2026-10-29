@@ -63,11 +63,11 @@ const STATUS_SHORT: Record<string, string> = Object.fromEntries(
 
 const summaryCards = computed(() => [
   { label: '上报总数', value: stats.value?.total ?? 0, color: 'var(--accent)' },
-  { label: '待复核', value: stats.value?.pending ?? 0, color: '#facc15' },
-  { label: '已通过', value: stats.value?.byStatus?.approved ?? 0, color: '#10b981' },
-  { label: '已驳回', value: stats.value?.byStatus?.rejected ?? 0, color: '#64748b' },
+  { label: '待复核', value: stats.value?.pending ?? 0, color: 'var(--warn)' },
+  { label: '已通过', value: stats.value?.byStatus?.approved ?? 0, color: 'var(--ok)' },
+  { label: '已驳回', value: stats.value?.byStatus?.rejected ?? 0, color: 'var(--text-dim)' },
   // 总数包含归档，不给它一张卡片的话四张卡加起来对不上总数，看着像少了数据
-  { label: '已归档', value: stats.value?.byStatus?.archived ?? 0, color: '#78716c' },
+  { label: '已归档', value: stats.value?.byStatus?.archived ?? 0, color: 'var(--text-faint)' },
 ])
 
 function notify(text: string, next: 'ok' | 'warn' | 'danger' = 'ok'): void {

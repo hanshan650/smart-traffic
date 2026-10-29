@@ -23,6 +23,38 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
 
     <!--
+      首屏主题判定（同步脚本）
+      ========================
+      必须在样式与 Vue 挂载之前执行：否则黑夜时段打开页面会先闪一下亮色，
+      再被 JS 改回深色。逻辑与 src/stores/theme.ts 保持一致：
+      18:00–06:00 为黑夜，其余为白天；本地保存过手动选择时以手动为准。
+
+      这里刻意不引用任何模块、不抛异常 —— 内联脚本一旦报错会阻塞后续解析。
+    -->
+    <script>
+      ;(function () {
+        var NIGHT_START = 18
+        var NIGHT_END = 6
+        var mode = 'auto'
+        try {
+          var saved = localStorage.getItem('traffic:theme-mode')
+          if (saved === 'auto' || saved === 'light' || saved === 'dark') mode = saved
+        } catch (error) {
+          /* 隐私模式取不到存储时按自动处理 */
+        }
+        var hour = new Date().getHours()
+        var tone =
+          mode === 'auto'
+            ? hour >= NIGHT_START || hour < NIGHT_END
+              ? 'dark'
+              : 'light'
+            : mode
+        document.documentElement.setAttribute('data-theme', tone)
+        document.documentElement.style.colorScheme = tone
+      })()
+    </script>
+
+    <!--
       这里的标题是**通用兜底值**：民众端与警务端共用同一份 index.html，
       实际标题由路由守卫按所在端设置（见 router/index.ts）。
       写上某一端的专属名称，另一端刷新时就会闪一下错误的标题。

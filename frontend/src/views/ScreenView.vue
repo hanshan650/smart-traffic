@@ -477,7 +477,7 @@ onBeforeUnmount(() => {
   place-items: center;
   border-radius: var(--radius-sm);
   background: linear-gradient(135deg, var(--accent), var(--accent-dim));
-  color: #06283d;
+  color: var(--on-accent);
   font-weight: 800;
   font-size: 15px;
 }
@@ -658,7 +658,7 @@ onBeforeUnmount(() => {
 }
 .rank-index.top {
   background: var(--accent-dim);
-  color: #06283d;
+  color: var(--on-accent);
   font-weight: 700;
 }
 .rank-name {

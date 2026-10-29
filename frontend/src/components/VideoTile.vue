@@ -174,7 +174,8 @@ const { status, attach } = useHls(videoEl, streamUrl)
   border-radius: 999px;
   background: rgba(7, 11, 20, 0.72);
   border: 1px solid var(--border-strong);
-  color: var(--text-faint);
+  /* 视频画面恒定是深色，徽章文字不能跟着日间主题变深 */
+  color: #cbd5e1;
   font-size: 11px;
   line-height: 1.6;
   pointer-events: none;
@@ -199,7 +200,8 @@ const { status, attach } = useHls(videoEl, streamUrl)
   justify-content: center;
   gap: 8px;
   background: rgba(7, 11, 20, 0.82);
-  color: var(--text-dim);
+  /* 遮罩叠在视频上，文字固定用浅色，不随主题反转 */
+  color: #cbd5e1;
   font-size: 12px;
 }
 .mask-icon {

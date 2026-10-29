@@ -88,9 +88,9 @@ const summaryCards = computed(() => {
   const data = stats.value
   return [
     { label: '警情总数', value: data?.total ?? 0, color: 'var(--accent)' },
-    { label: '待派警', value: data?.unassigned ?? 0, color: '#facc15' },
-    { label: '上报失败', value: data?.reportFailed ?? 0, color: '#ef4444' },
-    { label: '平均派警(分)', value: (data?.avgDispatchMinutes ?? 0).toFixed(1), color: '#22d3ee' },
+    { label: '待派警', value: data?.unassigned ?? 0, color: 'var(--warn)' },
+    { label: '上报失败', value: data?.reportFailed ?? 0, color: 'var(--danger)' },
+    { label: '平均派警(分)', value: (data?.avgDispatchMinutes ?? 0).toFixed(1), color: 'var(--accent)' },
   ]
 })
 

@@ -485,8 +485,8 @@ onMounted(() => {
   font-weight: 600;
 }
 .tag-ok {
-  background: rgba(74, 222, 128, 0.16);
-  color: #4ade80;
+  background: rgba(16, 185, 129, 0.16);
+  color: var(--ok);
 }
 .tag-off {
   background: var(--bg-panel-2);
@@ -503,7 +503,7 @@ onMounted(() => {
 }
 /* 关闭状态用左侧色条强调：这条信息是"怎么打开"，不是普通说明 */
 .cfg-note-off {
-  border-left: 3px solid #d97706;
+  border-left: 3px solid var(--orange);
 }
 
 .cfg-hint {
@@ -565,12 +565,12 @@ onMounted(() => {
   line-height: 1.7;
 }
 .cfg-msg-ok {
-  color: #4ade80;
+  color: var(--ok);
 }
 .cfg-msg-error {
-  color: #f87171;
+  color: var(--danger);
 }
 .cfg-msg-warn {
-  color: #fbbf24;
+  color: var(--warn);
 }
 </style>

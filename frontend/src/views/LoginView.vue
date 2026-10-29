@@ -13,6 +13,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { authApi } from '@/api'
 import { describeError } from '@/api/client'
+import ThemeToggle from '@/components/ThemeToggle.vue'
 import { useAuthStore } from '@/stores/auth'
 import type { RoleOption } from '@/types/api'
 
@@ -58,6 +59,9 @@ async function submit(): Promise<void> {
 
 <template>
   <div class="login-page">
+    <!-- 未登录时也能切换主题：夜间值班与白天演示的配色需要提前看一眼 -->
+    <ThemeToggle class="login-theme" />
+
     <form class="login-card" @submit.prevent="submit">
       <div class="brand">
         <div class="brand-mark">ST</div>
@@ -121,6 +125,7 @@ async function submit(): Promise<void> {
 
 <style scoped>
 .login-page {
+  position: relative;
   min-height: 100vh;
   display: flex;
   align-items: center;
@@ -130,6 +135,12 @@ async function submit(): Promise<void> {
   box-sizing: border-box;
 }
 
+.login-theme {
+  position: absolute;
+  top: max(16px, env(safe-area-inset-top));
+  right: 16px;
+}
+
 .login-card {
   width: 100%;
   max-width: 400px;
@@ -137,7 +148,7 @@ async function submit(): Promise<void> {
   background: var(--bg-panel, #0f172a);
   border: 1px solid var(--border, #1e293b);
   border-radius: 14px;
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
+  box-shadow: var(--shadow-lg, 0 18px 48px rgba(0, 0, 0, 0.42));
 }
 
 .brand {
@@ -154,7 +165,7 @@ async function submit(): Promise<void> {
   justify-content: center;
   border-radius: 10px;
   background: var(--accent, #22d3ee);
-  color: #05202a;
+  color: var(--on-accent, #05202a);
   font-weight: 700;
   letter-spacing: 0.5px;
 }
@@ -208,8 +219,8 @@ async function submit(): Promise<void> {
   padding: 9px 11px;
   border-radius: 8px;
   background: rgba(248, 113, 113, 0.12);
-  border-left: 3px solid #f87171;
-  color: #fca5a5;
+  border-left: 3px solid var(--danger);
+  color: var(--danger);
   font-size: 13px;
   line-height: 1.6;
 }
@@ -220,7 +231,7 @@ async function submit(): Promise<void> {
   border: none;
   border-radius: 9px;
   background: var(--accent, #22d3ee);
-  color: #05202a;
+  color: var(--on-accent, #05202a);
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;

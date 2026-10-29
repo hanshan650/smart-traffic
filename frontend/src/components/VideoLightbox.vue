@@ -218,7 +218,8 @@ onBeforeUnmount(() => {
   justify-content: center;
   gap: 10px;
   background: rgba(7, 11, 20, 0.85);
-  color: var(--text-dim);
+  /* 叠在视频上的遮罩：无论白天黑夜都用浅色文字 */
+  color: #cbd5e1;
   font-size: 13px;
 }
 .mask-icon {

@@ -195,7 +195,7 @@ onMounted(load)
 .error {
   margin: 10px 0 0;
   font-size: 13px;
-  color: #f87171;
+  color: var(--danger);
 }
 
 .stats {
@@ -274,11 +274,11 @@ onMounted(load)
   white-space: nowrap;
 }
 .outcome.ok {
-  background: rgba(74, 222, 128, 0.16);
-  color: #4ade80;
+  background: rgba(16, 185, 129, 0.16);
+  color: var(--ok);
 }
 .outcome.warn {
-  background: rgba(251, 191, 36, 0.16);
-  color: #fbbf24;
+  background: rgba(250, 204, 21, 0.16);
+  color: var(--warn);
 }
 </style>

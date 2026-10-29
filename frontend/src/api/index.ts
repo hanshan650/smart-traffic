@@ -315,6 +315,15 @@ export const officerApi = {
   update: (officerId: string, payload: Record<string, unknown>) =>
     http.put<Officer>(`/officers/${officerId}`, payload).then((r) => r.data),
 
+  /** 上报警员实时位置（GCJ-02），成功后后端会广播 officer:update */
+  updateLocation: (
+    officerId: string,
+    payload: { latitude: number; longitude: number; accuracy?: number; source?: string },
+  ) =>
+    http
+      .put<Officer>(`/officers/${encodeURIComponent(officerId)}/location`, payload)
+      .then((r) => r.data),
+
   remove: (officerId: string) =>
     http.delete<{ success: boolean; message: string }>(`/officers/${officerId}`).then((r) => r.data),
 
@@ -413,12 +422,27 @@ export const surveillanceApi = {
       )
       .then((r) => r.data),
 
-  /** 违停告警列表 */
-  alerts: (params: { limit?: number; cameraId?: string; status?: string } = {}) =>
+  /** 违停告警列表（limit 仅用于兼容旧调用，新页面使用 page/pageSize） */
+  alerts: (
+    params: {
+      limit?: number
+      page?: number
+      pageSize?: number
+      cameraId?: string
+      status?: string
+      startTime?: string
+      endTime?: string
+    } = {},
+  ) =>
     http
-      .get<{ success: boolean; total: number; items: StallAlert[] }>('/surveillance/alerts', {
-        params,
-      })
+      .get<{
+        success: boolean
+        total: number
+        items: StallAlert[]
+        page: number
+        pageSize: number
+        totalPages: number
+      }>('/surveillance/alerts', { params })
       .then((r) => r.data),
 
   alertStats: () =>

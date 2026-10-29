@@ -17,6 +17,7 @@ import { useVideoStore } from '@/stores/video'
 import { sidebarItems } from '@/config/nav'
 import { useWebSocket } from '@/composables/useWebSocket'
 import PwaPrompt from '@/components/PwaPrompt.vue'
+import ThemeToggle from '@/components/ThemeToggle.vue'
 import {
   CONGESTION_COLOR,
   CONGESTION_LABEL,
@@ -214,6 +215,9 @@ watch(
         <h1 class="page-title">{{ route.meta.title ?? '' }}</h1>
 
         <div class="topbar-right">
+          <!-- 主题：默认跟随时间，也可手动固定为白天 / 黑夜 -->
+          <ThemeToggle />
+
           <!--
             窄屏下状态文字收起，只留圆点；但**断线时必须保留文字** ——
             红点本身不说明问题，值班员需要一眼看出"连不上了"。
@@ -416,7 +420,7 @@ watch(
   place-items: center;
   border-radius: var(--radius-sm);
   background: linear-gradient(135deg, var(--accent), var(--accent-dim));
-  color: #06283d;
+  color: var(--on-accent);
   font-weight: 700;
   font-size: 13px;
 }
@@ -456,7 +460,7 @@ watch(
   color: var(--text);
 }
 .nav-item.active {
-  background: rgba(34, 211, 238, 0.12);
+  background: var(--accent-soft);
   color: var(--accent);
   font-weight: 600;
 }
@@ -609,7 +613,7 @@ kbd {
   padding: 1px 5px;
   border: 1px solid var(--border-strong);
   border-radius: 3px;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--kbd-bg);
   font-size: 10px;
 }
 
@@ -681,7 +685,7 @@ kbd {
     position: fixed;
     inset: 0;
     z-index: 1400;
-    background: rgba(2, 6, 12, 0.6);
+    background: var(--overlay-mask);
   }
 
   .drawer-close {
@@ -799,7 +803,7 @@ kbd {
   justify-content: center;
   border-radius: 50%;
   background: var(--accent);
-  color: #05202a;
+  color: var(--on-accent);
   font-size: 12px;
   font-weight: 700;
 }
@@ -836,7 +840,7 @@ kbd {
   border: 1px solid var(--border-strong);
   border-radius: 10px;
   background: var(--bg-panel);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.42);
+  box-shadow: var(--shadow-lg);
 }
 .menu-head {
   display: flex;
@@ -874,7 +878,7 @@ kbd {
   background: var(--bg-panel-2);
 }
 .menu-item.danger:hover {
-  color: #f87171;
+  color: var(--danger);
 }
 
 /* 窄屏只留头像圆点：顶栏本来就有实时连接、健康、待复核三个徒章，

@@ -19,6 +19,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { publicApi } from '@/api/citizen'
 import { describeError } from '@/api/client'
 import RouteMap from '@/components/citizen/RouteMap.vue'
+import { webglAvailable } from '@/composables/useAmap'
 import { useGeolocation } from '@/composables/useGeolocation'
 import { CITIZEN_CONGESTION_COLOR, CITIZEN_LEVEL_COLOR } from '@/types/citizen'
 import { formatDistance } from '@/utils/geo'
@@ -49,6 +50,56 @@ const isDemo = ref(false)
  * 被监测的路段上时，这是他唯一能主动做的操作。
  */
 const manualRoad = ref('')
+
+/**
+ * 3D 视图偏好。
+ *
+ * 存在 localStorage 里：开车的人通常一直用 3D，每次打开都要重开一次
+ * 是个纯粹的重复劳动。但**能不能用**不缓存 —— WebGL 是逐个环境判断的，
+ * 换成省电模式或换台设备就没了。
+ */
+const MAP_3D_KEY = 'citizen:map3d'
+const can3D = webglAvailable()
+
+function read3DPreference(): boolean {
+  try {
+    return window.localStorage.getItem(MAP_3D_KEY) === '1'
+  } catch {
+    // 隐私模式下 localStorage 可能直接抛错，此时按默认 2D 处理
+    return false
+  }
+}
+
+const is3D = ref(can3D && read3DPreference())
+/** 3D 打不开时的说明（设备不支持 / 渲染器拒绝切换） */
+const modeNotice = ref('')
+
+function toggle3D(): void {
+  if (!can3D) return
+  is3D.value = !is3D.value
+  modeNotice.value = ''
+  try {
+    window.localStorage.setItem(MAP_3D_KEY, is3D.value ? '1' : '0')
+  } catch {
+    // 存不下就算了，不影响本次使用
+  }
+}
+
+/**
+ * 地图报告"切不过去"。
+ *
+ * 不能保持开关亮着：用户会反复点，最后认定整页都坏了。
+ * 复位并说明原因，比留一个假开关诚实。
+ */
+function on3DUnavailable(): void {
+  is3D.value = false
+  modeNotice.value = '当前设备无法启用 3D 视图，已保持 2D'
+  try {
+    window.localStorage.setItem(MAP_3D_KEY, '0')
+  } catch {
+    // 同上
+  }
+}
 
 const { state: geoState, fix: geoFix, message: geoMessage, start: startGeo } =
   useGeolocation()
@@ -89,9 +140,28 @@ const accuracyWarning = computed(() => {
 
 const tone = computed(() => {
   const key = overview.value?.overall
-  if (key === 'attention') return { color: '#dc2626', bg: '#fef2f2', icon: '!' }
-  if (key === 'busy') return { color: '#ea580c', bg: '#fff7ed', icon: '~' }
-  return { color: '#16a34a', bg: '#f0fdf4', icon: '✓' }
+  if (key === 'attention') {
+    return {
+      color: 'var(--c-danger)',
+      bg: 'var(--c-danger-soft)',
+      border: 'var(--c-danger-border)',
+      icon: '!',
+    }
+  }
+  if (key === 'busy') {
+    return {
+      color: 'var(--c-warn)',
+      bg: 'var(--c-warn-soft)',
+      border: 'var(--c-warn-border)',
+      icon: '~',
+    }
+  }
+  return {
+    color: 'var(--c-ok)',
+    bg: 'var(--c-ok-soft)',
+    border: 'var(--c-primary-border)',
+    icon: '✓',
+  }
 })
 
 const levelCards = computed(() => {
@@ -200,7 +270,33 @@ function clearManual(): void {
         >
           ☰ 列表
         </button>
+
+        <!--
+          2D / 3D 开关。
+          做成拨动开关而不是第三个分段按钮：它和旁边两个不是同一组选择
+          （那边选"看什么"，这里选"怎么看"），用同样的外观会被当成并列项。
+        -->
+        <button
+          class="switch-3d"
+          :class="{ on: is3D, disabled: !can3D || viewMode !== 'map' }"
+          :disabled="!can3D || viewMode !== 'map'"
+          role="switch"
+          :aria-checked="is3D"
+          :title="
+            !can3D
+              ? '当前设备不支持 3D 视图'
+              : viewMode === 'map'
+                ? '切换 2D / 3D 视图'
+                : '切回行进视图后可用'
+          "
+          @click="toggle3D"
+        >
+          <span class="switch-track"><span class="switch-knob" /></span>
+          <span class="switch-label">3D</span>
+        </button>
       </div>
+
+      <p v-if="modeNotice" class="mode-note">{{ modeNotice }}</p>
 
       <!-- ============================ 地图视图 ============================ -->
       <RouteMap
@@ -210,10 +306,13 @@ function clearManual(): void {
         :geo-message="geoMessage"
         :route="route"
         :rank="rank"
+        :events="events"
         :roads="roads"
         :demo="isDemo"
+        :three-d="is3D"
         @locate="startGeo"
         @select-road="selectRoad"
+        @three-d-unavailable="on3DUnavailable"
       />
 
       <!-- ============================ 列表视图 ============================ -->
@@ -224,7 +323,7 @@ function clearManual(): void {
 
         <section
           class="c-card status-card"
-          :style="{ background: tone.bg, borderColor: tone.color + '33' }"
+          :style="{ background: tone.bg, borderColor: tone.border }"
         >
           <span class="status-icon" :style="{ background: tone.color }">{{ tone.icon }}</span>
           <div>
@@ -535,7 +634,7 @@ function clearManual(): void {
   border-radius: 50%;
   display: grid;
   place-items: center;
-  color: #fff;
+  color: var(--c-on-primary);
   font-size: var(--fs-lg);
   font-weight: 700;
 }
@@ -692,7 +791,7 @@ function clearManual(): void {
 }
 .rank-no.top {
   background: var(--c-primary);
-  color: #fff;
+  color: var(--c-on-primary);
 }
 .rank-main {
   flex: 1;
@@ -844,6 +943,86 @@ function clearManual(): void {
   background: var(--c-primary-soft);
   color: var(--c-primary);
   font-weight: 600;
+}
+
+/* -------------------------------------------------------- 2D / 3D 开关 */
+
+.switch-3d {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 clamp(8px, 0.6vw + 6px, 12px);
+  border: none;
+  border-left: 1px solid var(--c-border);
+  background: none;
+  color: var(--c-text-dim);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  min-height: clamp(30px, 1vw + 26px, 42px);
+}
+.switch-3d.on {
+  color: var(--c-primary);
+  font-weight: 600;
+}
+.switch-3d.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.switch-track {
+  position: relative;
+  width: 30px;
+  height: 17px;
+  border-radius: 999px;
+  background: var(--c-border-strong);
+  transition: background 0.18s;
+}
+.switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.35);
+  transition: transform 0.18s;
+}
+.switch-3d.on .switch-track {
+  background: var(--c-primary);
+}
+.switch-3d.on .switch-knob {
+  transform: translateX(13px);
+}
+
+.switch-label {
+  line-height: 1;
+}
+
+.mode-note {
+  margin: -2px 0 0;
+  font-size: var(--fs-xs);
+  color: var(--c-warn);
+}
+
+/*
+  手机端要在右侧留出位置。
+  顶栏隐藏后主题切换按钮固定在右上角（见 CitizenLayout），
+  它与这一行处在同一高度，会把 3D 开关整个盖住 —— 留出一个按钮的宽度，
+  开关就不会被压在下面。
+*/
+@media (max-width: 767px) {
+  .view-switch {
+    padding-right: 46px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switch-track,
+  .switch-knob {
+    transition: none;
+  }
 }
 
 .c-btn {
